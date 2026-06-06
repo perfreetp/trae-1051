@@ -3,7 +3,7 @@
     <div class="page-header">
       <h2 class="page-title">翻箱任务</h2>
       <div class="header-actions no-print">
-        <el-button type="primary" @click="showCreateDialog = true">
+        <el-button type="primary" @click="handleCreateClick">
           <el-icon><Plus /></el-icon>
           <span>新建任务</span>
         </el-button>
@@ -13,6 +13,10 @@
         </el-button>
       </div>
     </div>
+
+    <el-tabs v-model="activeTab" class="main-tabs">
+      <el-tab-pane label="任务管理" name="tasks">
+
 
     <el-row :gutter="16" class="stat-cards">
       <el-col :span="6">
@@ -240,6 +244,74 @@
       </el-col>
     </el-row>
 
+      </el-tab-pane>
+
+      <el-tab-pane label="作业历史" name="history">
+        <el-card class="card-shadow">
+          <template #header>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span>箱号作业历史查询</span>
+            </div>
+          </template>
+
+          <div class="history-search-bar">
+            <el-input 
+              v-model="historyContainerNo" 
+              placeholder="请输入箱号查询作业历史" 
+              clearable 
+              style="width: 300px;"
+              @keyup.enter="searchContainerHistory"
+            >
+              <template #prefix>
+                <el-icon><Search /></el-icon>
+              </template>
+            </el-input>
+            <el-button type="primary" @click="searchContainerHistory">查询</el-button>
+          </div>
+
+          <el-alert 
+            v-if="historyContainerInfo && historyContainerInfo.isDeparted" 
+            title="该箱已离场，仅可查看历史" 
+            type="warning" 
+            :closable="false" 
+            show-icon 
+            style="margin-bottom: 16px;"
+          />
+
+          <div v-if="searchedContainerNo" style="margin-top: 16px;">
+            <h4 style="margin: 0 0 12px 0;">箱号「{{ searchedContainerNo }}」的作业历史</h4>
+            <el-table :data="containerHistoryTasks" border stripe v-loading="historyLoading">
+              <el-table-column prop="taskNo" label="任务编号" width="180" fixed="left" />
+              <el-table-column prop="taskType" label="任务类型" width="100" align="center">
+                <template #default="{ row }">
+                  <el-tag :type="getTaskTypeTag(row.taskType)" size="small">{{ getTaskTypeName(row.taskType) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="priority" label="优先级" width="90" align="center">
+                <template #default="{ row }">
+                  <el-tag :type="getPriorityTag(row.priority)" size="small">P{{ row.priority }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="status" label="状态" width="100" align="center">
+                <template #default="{ row }">
+                  <span :class="['tag-status', row.status]">{{ getStatusName(row.status) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="fromLocation" label="起始位置" width="120" align="center" />
+              <el-table-column prop="toLocation" label="目标位置" width="120" align="center" />
+              <el-table-column prop="createdAt" label="创建时间" width="170" />
+              <el-table-column label="操作" width="100" fixed="right">
+                <template #default="{ row }">
+                  <el-button type="primary" link size="small" @click="viewTask(row)">详情</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-empty v-if="containerHistoryTasks.length === 0 && !historyLoading" description="暂无作业历史记录" />
+          </div>
+        </el-card>
+      </el-tab-pane>
+    </el-tabs>
+
     <el-dialog v-model="showCreateDialog" title="新建移箱任务" width="600px" class="no-print">
       <el-form :model="taskForm" label-width="100px">
         <el-form-item label="任务类型">
@@ -291,25 +363,44 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showDetailDialog" title="任务详情" width="600px">
-      <el-descriptions v-if="selectedTask" :column="2" border size="small">
-        <el-descriptions-item label="任务编号">{{ selectedTask.taskNo }}</el-descriptions-item>
-        <el-descriptions-item label="任务类型">{{ getTaskTypeName(selectedTask.taskType) }}</el-descriptions-item>
-        <el-descriptions-item label="箱号">{{ selectedTask.containerNo }}</el-descriptions-item>
-        <el-descriptions-item label="优先级">P{{ selectedTask.priority }}</el-descriptions-item>
-        <el-descriptions-item label="起始位置">{{ selectedTask.fromLocation }}</el-descriptions-item>
-        <el-descriptions-item label="目标位置">{{ selectedTask.toLocation }}</el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <span :class="['tag-status', selectedTask.status]">{{ getStatusName(selectedTask.status) }}</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="设备">{{ selectedTask.equipment || '未分配' }}</el-descriptions-item>
-        <el-descriptions-item label="负责人">{{ selectedTask.assignedTo || '未分配' }}</el-descriptions-item>
-        <el-descriptions-item label="创建人">{{ selectedTask.createdBy }}</el-descriptions-item>
-        <el-descriptions-item label="创建时间">{{ selectedTask.createdAt }}</el-descriptions-item>
-        <el-descriptions-item v-if="selectedTask.startTime" label="开始时间">{{ selectedTask.startTime }}</el-descriptions-item>
-        <el-descriptions-item v-if="selectedTask.endTime" label="完成时间">{{ selectedTask.endTime }}</el-descriptions-item>
-        <el-descriptions-item v-if="selectedTask.remarks" label="备注" :span="2">{{ selectedTask.remarks }}</el-descriptions-item>
-      </el-descriptions>
+    <el-dialog v-model="showDetailDialog" title="任务详情" width="700px">
+      <div v-if="selectedTask">
+        <el-descriptions :column="2" border size="small" title="任务信息">
+          <el-descriptions-item label="任务编号">{{ selectedTask.taskNo }}</el-descriptions-item>
+          <el-descriptions-item label="任务类型">{{ getTaskTypeName(selectedTask.taskType) }}</el-descriptions-item>
+          <el-descriptions-item label="箱号">{{ selectedTask.containerNo }}</el-descriptions-item>
+          <el-descriptions-item label="优先级">P{{ selectedTask.priority }}</el-descriptions-item>
+          <el-descriptions-item label="起始位置">{{ selectedTask.fromLocation }}</el-descriptions-item>
+          <el-descriptions-item label="目标位置">{{ selectedTask.toLocation }}</el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <span :class="['tag-status', selectedTask.status]">{{ getStatusName(selectedTask.status) }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="设备">{{ selectedTask.equipment || '未分配' }}</el-descriptions-item>
+          <el-descriptions-item label="负责人">{{ selectedTask.assignedTo || '未分配' }}</el-descriptions-item>
+          <el-descriptions-item label="创建人">{{ selectedTask.createdBy }}</el-descriptions-item>
+          <el-descriptions-item label="创建时间">{{ selectedTask.createdAt }}</el-descriptions-item>
+          <el-descriptions-item v-if="selectedTask.startTime" label="开始时间">{{ selectedTask.startTime }}</el-descriptions-item>
+          <el-descriptions-item v-if="selectedTask.endTime" label="完成时间">{{ selectedTask.endTime }}</el-descriptions-item>
+          <el-descriptions-item v-if="selectedTask.remarks" label="备注" :span="2">{{ selectedTask.remarks }}</el-descriptions-item>
+        </el-descriptions>
+
+        <el-divider content-position="left">集装箱信息</el-divider>
+        <el-descriptions v-if="taskContainerInfo" :column="2" border size="small">
+          <el-descriptions-item label="箱号">{{ taskContainerInfo.containerNo }}</el-descriptions-item>
+          <el-descriptions-item label="尺寸类型">{{ taskContainerInfo.size }}</el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <el-tag :type="taskContainerInfo.status === 'in' ? 'success' : taskContainerInfo.status === 'out' ? 'info' : 'warning'" size="small">
+              {{ taskContainerInfo.status === 'in' ? '在场' : taskContainerInfo.status === 'out' ? '已离场' : taskContainerInfo.status === 'moving' ? '移动中' : '破损' }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="当前位置">{{ taskContainerInfo.location || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="优先级">P{{ taskContainerInfo.priority }}</el-descriptions-item>
+          <el-descriptions-item label="到场时间">{{ taskContainerInfo.arrivalTime }}</el-descriptions-item>
+          <el-descriptions-item v-if="taskContainerInfo.vesselName" label="船名">{{ taskContainerInfo.vesselName }}</el-descriptions-item>
+          <el-descriptions-item v-if="taskContainerInfo.blNo" label="提单号">{{ taskContainerInfo.blNo }}</el-descriptions-item>
+        </el-descriptions>
+        <el-empty v-else description="未获取到集装箱信息" :image-size="80" />
+      </div>
       <template #footer class="no-print">
         <el-button @click="showDetailDialog = false">关闭</el-button>
         <el-button type="primary" @click="printTask">打印作业单</el-button>
@@ -319,14 +410,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, watch } from 'vue'
 import { useYardStore } from '@/stores/yard'
-import type { MoveTask, Equipment, Staff } from '@/types'
+import type { MoveTask, Equipment, Staff, Container } from '@/types'
 import { mockEquipments, mockStaffs } from '@/types/mock'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 
 const yardStore = useYardStore()
+const activeTab = ref('tasks')
 const filterStatus = ref('')
 const filterType = ref('')
 const filterPriority = ref<number | ''>('')
@@ -339,6 +431,14 @@ const equipmentList = ref<Equipment[]>(mockEquipments)
 const staffList = ref<Staff[]>(mockStaffs)
 const loadContainerError = ref('')
 const autoLoadedPriority = ref(false)
+const userModifiedPriority = ref(false)
+
+const historyContainerNo = ref('')
+const searchedContainerNo = ref('')
+const historyLoading = ref(false)
+const containerHistoryTasks = ref<MoveTask[]>([])
+const historyContainerInfo = ref<{ containerNo: string; isDeparted: boolean } | null>(null)
+const taskContainerInfo = ref<Container | null>(null)
 
 const taskForm = reactive({
   taskType: 'move',
@@ -349,6 +449,12 @@ const taskForm = reactive({
   equipment: '',
   assignedTo: '',
   remarks: ''
+})
+
+watch(() => taskForm.priority, (newVal, oldVal) => {
+  if (oldVal !== undefined && newVal !== oldVal && autoLoadedPriority.value) {
+    userModifiedPriority.value = true
+  }
 })
 
 const filteredTasks = computed(() => {
@@ -449,6 +555,7 @@ function getEquipmentStatusName(status: string) {
 
 function viewTask(task: MoveTask) {
   selectedTask.value = task
+  taskContainerInfo.value = yardStore.findContainerByNo(task.containerNo, true) || null
   showDetailDialog.value = true
 }
 
@@ -496,13 +603,15 @@ function loadContainerInfo() {
   if (yardStore.isContainerDeparted(no)) {
     loadContainerError.value = '该箱号已离场，需要先重新登记到场后才能创建作业任务'
     autoLoadedPriority.value = false
+    userModifiedPriority.value = false
     return
   }
   
   const container = yardStore.findContainerByNo(no)
   if (container) {
-    if (!autoLoadedPriority.value) {
+    if (!userModifiedPriority.value) {
       taskForm.priority = container.priority
+      autoLoadedPriority.value = true
     }
     if (!taskForm.fromLocation && container.location) {
       taskForm.fromLocation = container.location
@@ -531,7 +640,7 @@ function createTask() {
     return
   }
   
-  const taskPriority = autoLoadedPriority.value ? taskForm.priority : container.priority
+  const taskPriority = userModifiedPriority.value || autoLoadedPriority.value ? taskForm.priority : container.priority
   
   const result = yardStore.createMoveTask({
     taskType: taskForm.taskType as MoveTask['taskType'],
@@ -557,9 +666,38 @@ function createTask() {
     taskForm.assignedTo = ''
     taskForm.remarks = ''
     autoLoadedPriority.value = false
+    userModifiedPriority.value = false
   } else {
     ElMessage.error(result.message)
   }
+}
+
+function handleCreateClick() {
+  if (taskForm.containerNo.trim() && yardStore.isContainerDeparted(taskForm.containerNo.trim())) {
+    ElMessage.error('该箱号已离场，需要先重新登记到场后才能创建作业任务')
+    return
+  }
+  showCreateDialog.value = true
+}
+
+function searchContainerHistory() {
+  if (!historyContainerNo.value.trim()) {
+    ElMessage.warning('请输入箱号')
+    return
+  }
+  
+  const no = historyContainerNo.value.trim()
+  searchedContainerNo.value = no
+  historyLoading.value = true
+  
+  setTimeout(() => {
+    containerHistoryTasks.value = yardStore.getContainerTasks(no)
+    historyContainerInfo.value = {
+      containerNo: no,
+      isDeparted: yardStore.isContainerDeparted(no)
+    }
+    historyLoading.value = false
+  }, 300)
 }
 
 function handleSearch() {
@@ -666,5 +804,16 @@ function printTask() {
   color: #999;
   padding-top: 8px;
   border-top: 1px solid #f0f0f0;
+}
+
+.main-tabs {
+  margin-top: 16px;
+}
+
+.history-search-bar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
 }
 </style>

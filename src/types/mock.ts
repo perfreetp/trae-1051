@@ -36,17 +36,19 @@ export function generateMockContainers(count: number = 200): Container[] {
     const arrivalTime = dayjs().subtract(Math.floor(Math.random() * 30), 'day').format('YYYY-MM-DD HH:mm:ss')
     const overdueDays = Math.floor(Math.random() * 20)
     const isOverdue = overdueDays > 7
+    const isDeparted = Math.random() > 0.85
+    const totalCycles = Math.floor(Math.random() * 3) + 1
 
     containers.push({
       id: generateId(),
       containerNo: generateContainerNo(),
       size,
       type: isReefer ? 'RF' : types[Math.floor(Math.random() * 3)],
-      status: 'in',
-      location: `${zone.zoneCode}${Math.floor(Math.random() * zone.maxBay) + 1}${Math.floor(Math.random() * zone.maxRow) + 1}${Math.floor(Math.random() * zone.maxTier) + 1}`,
-      bay: Math.floor(Math.random() * zone.maxBay) + 1,
-      row: Math.floor(Math.random() * zone.maxRow) + 1,
-      tier: Math.floor(Math.random() * zone.maxTier) + 1,
+      status: isDeparted ? 'out' : 'in',
+      location: isDeparted ? '' : `${zone.zoneCode}${Math.floor(Math.random() * zone.maxBay) + 1}${Math.floor(Math.random() * zone.maxRow) + 1}${Math.floor(Math.random() * zone.maxTier) + 1}`,
+      bay: isDeparted ? 0 : Math.floor(Math.random() * zone.maxBay) + 1,
+      row: isDeparted ? 0 : Math.floor(Math.random() * zone.maxRow) + 1,
+      tier: isDeparted ? 0 : Math.floor(Math.random() * zone.maxTier) + 1,
       weight: Math.floor(Math.random() * 28000) + 2000,
       isHazardous,
       hazardLevel: isHazardous ? ['1.4', '2.1', '3', '4.1', '5.1', '6.1', '8', '9'][Math.floor(Math.random() * 8)] : undefined,
@@ -54,17 +56,19 @@ export function generateMockContainers(count: number = 200): Container[] {
       targetTemp: isReefer ? [-18, -12, -5, 0, 2, 5, 10][Math.floor(Math.random() * 7)] : undefined,
       currentTemp: isReefer ? (-18 + Math.random() * 30) : undefined,
       arrivalTime,
-      departureTime: Math.random() > 0.7 ? dayjs(arrivalTime).add(Math.floor(Math.random() * 10), 'day').format('YYYY-MM-DD HH:mm:ss') : undefined,
+      departureTime: isDeparted ? dayjs(arrivalTime).add(Math.floor(Math.random() * 10), 'day').format('YYYY-MM-DD HH:mm:ss') : undefined,
       vesselName: ['马士基号', '中远之星', '中海号', '东方海外', '海丰号', '中外运'][Math.floor(Math.random() * 6)],
       voyageNo: `V${Math.floor(Math.random() * 1000).toString().padStart(4, '0')}E`,
       blNo: `BL${Math.floor(Math.random() * 900000 + 100000)}`,
       consignee: ['贸易公司A', '进出口公司B', '物流公司C', '制造业D', '电子科技E'][Math.floor(Math.random() * 5)],
       shipper: ['工厂X', '供应商Y', '生产商Z'][Math.floor(Math.random() * 3)],
       priority: Math.floor(Math.random() * 5) + 1,
-      isOverdue,
+      isOverdue: !isDeparted && isOverdue,
       overdueDays: isOverdue ? overdueDays : 0,
       createdAt: arrivalTime,
-      updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss')
+      updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      cycleIndex: totalCycles,
+      totalCycles
     })
   }
   

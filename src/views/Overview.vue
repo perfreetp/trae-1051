@@ -145,7 +145,36 @@
               </div>
             </div>
           </template>
-          <el-table :data="displayContainers" border stripe max-height="400">
+          
+          <div v-if="searchedDepartedContainer" class="departed-hint-card">
+            <el-alert type="warning" show-icon :closable="false">
+              <template #title>
+                <div style="font-weight: bold; margin-bottom: 8px;">
+                  <el-icon style="vertical-align: middle; margin-right: 4px;"><Warning /></el-icon>
+                  该箱已离场
+                </div>
+                <div style="font-size: 13px; color: #606266; margin-bottom: 8px;">
+                  <p><strong>箱号：</strong>{{ searchedDepartedContainer.containerNo }}</p>
+                  <p><strong>离场时间：</strong>{{ searchedDepartedContainer.departureTime }}</p>
+                  <p><strong>原箱位：</strong>{{ searchedDepartedContainer.location || '未知' }}</p>
+                </div>
+                <el-button type="primary" size="small" @click="viewContainer(searchedDepartedContainer)" style="margin-right: 8px;">
+                  <el-icon><View /></el-icon>
+                  查看详情
+                </el-button>
+                <el-button type="success" size="small" @click="goToImportExport">
+                  <el-icon><Document /></el-icon>
+                  查看离港记录
+                </el-button>
+              </template>
+            </el-alert>
+          </div>
+          
+          <div v-else-if="isExactSearchNoMatch" class="no-match-hint">
+            <el-empty description="未找到相关集装箱" :image-size="80" />
+          </div>
+          
+          <el-table v-else :data="displayContainers" border stripe max-height="400">
             <el-table-column prop="containerNo" label="箱号" width="140" fixed="left" />
             <el-table-column prop="size" label="尺寸" width="90" align="center" />
             <el-table-column prop="location" label="位置" width="100" align="center" />
@@ -180,33 +209,78 @@
       </el-col>
     </el-row>
 
-    <el-dialog v-model="detailVisible" title="集装箱详情" width="600px">
-      <el-descriptions v-if="selectedContainer" :column="2" border>
-        <el-descriptions-item label="箱号">{{ selectedContainer.containerNo }}</el-descriptions-item>
-        <el-descriptions-item label="尺寸">{{ selectedContainer.size }}</el-descriptions-item>
-        <el-descriptions-item label="类型">{{ selectedContainer.type }}</el-descriptions-item>
-        <el-descriptions-item label="位置">{{ selectedContainer.location }}</el-descriptions-item>
-        <el-descriptions-item label="重量">{{ selectedContainer.weight }} kg</el-descriptions-item>
-        <el-descriptions-item label="优先级">
-          <el-tag :type="getPriorityTagType(selectedContainer.priority)" size="small">P{{ selectedContainer.priority }}</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="冷藏箱">{{ selectedContainer.isReefer ? '是' : '否' }}</el-descriptions-item>
-        <el-descriptions-item label="危险品">{{ selectedContainer.isHazardous ? '是' : '否' }}</el-descriptions-item>
-        <el-descriptions-item v-if="selectedContainer.isHazardous" label="危险品等级">{{ selectedContainer.hazardLevel }}</el-descriptions-item>
-        <el-descriptions-item v-if="selectedContainer.isReefer" label="目标温度">{{ selectedContainer.targetTemp }}°C</el-descriptions-item>
-        <el-descriptions-item label="船名">{{ selectedContainer.vesselName }}</el-descriptions-item>
-        <el-descriptions-item label="航次">{{ selectedContainer.voyageNo }}</el-descriptions-item>
-        <el-descriptions-item label="提单号">{{ selectedContainer.blNo }}</el-descriptions-item>
-        <el-descriptions-item label="收货人">{{ selectedContainer.consignee }}</el-descriptions-item>
-        <el-descriptions-item label="发货人">{{ selectedContainer.shipper }}</el-descriptions-item>
-        <el-descriptions-item label="到场时间">{{ selectedContainer.arrivalTime }}</el-descriptions-item>
-        <el-descriptions-item label="预计离港">{{ selectedContainer.departureTime || '未安排' }}</el-descriptions-item>
-        <el-descriptions-item label="超期堆存">{{ selectedContainer.isOverdue ? `是 (${selectedContainer.overdueDays}天)` : '否' }}</el-descriptions-item>
-      </el-descriptions>
+    <el-dialog v-model="detailVisible" title="集装箱详情" width="650px">
+      <el-tabs v-model="activeTab" v-if="selectedContainer">
+        <el-tab-pane label="基本信息" name="basic">
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="箱号">{{ selectedContainer.containerNo }}</el-descriptions-item>
+            <el-descriptions-item label="尺寸">{{ selectedContainer.size }}</el-descriptions-item>
+            <el-descriptions-item label="类型">{{ selectedContainer.type }}</el-descriptions-item>
+            <el-descriptions-item label="位置">
+              <span v-if="selectedContainer.status !== 'out'">{{ selectedContainer.location }}</span>
+              <span v-else style="color: #f5222d; font-weight: bold;">已离场</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="重量">{{ selectedContainer.weight }} kg</el-descriptions-item>
+            <el-descriptions-item label="优先级">
+              <el-tag :type="getPriorityTagType(selectedContainer.priority)" size="small">P{{ selectedContainer.priority }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="冷藏箱">{{ selectedContainer.isReefer ? '是' : '否' }}</el-descriptions-item>
+            <el-descriptions-item label="危险品">{{ selectedContainer.isHazardous ? '是' : '否' }}</el-descriptions-item>
+            <el-descriptions-item v-if="selectedContainer.isHazardous" label="危险品等级">{{ selectedContainer.hazardLevel }}</el-descriptions-item>
+            <el-descriptions-item v-if="selectedContainer.isReefer" label="目标温度">{{ selectedContainer.targetTemp }}°C</el-descriptions-item>
+            <el-descriptions-item label="船名">{{ selectedContainer.vesselName }}</el-descriptions-item>
+            <el-descriptions-item label="航次">{{ selectedContainer.voyageNo }}</el-descriptions-item>
+            <el-descriptions-item label="提单号">{{ selectedContainer.blNo }}</el-descriptions-item>
+            <el-descriptions-item label="收货人">{{ selectedContainer.consignee }}</el-descriptions-item>
+            <el-descriptions-item label="发货人">{{ selectedContainer.shipper }}</el-descriptions-item>
+            <el-descriptions-item label="到场时间">{{ selectedContainer.arrivalTime }}</el-descriptions-item>
+            <el-descriptions-item label="预计离港">{{ selectedContainer.departureTime || '未安排' }}</el-descriptions-item>
+            <el-descriptions-item label="超期堆存">{{ selectedContainer.isOverdue ? `是 (${selectedContainer.overdueDays}天)` : '否' }}</el-descriptions-item>
+          </el-descriptions>
+        </el-tab-pane>
+        <el-tab-pane label="生命周期时间线" name="lifecycle">
+          <div class="lifecycle-timeline">
+            <el-timeline v-if="containerLifecycle.length > 0">
+              <el-timeline-item
+                v-for="event in containerLifecycle"
+                :key="event.id"
+                :timestamp="event.eventTime"
+                :color="getEventTypeColor(event.eventType)"
+              >
+                <el-card shadow="never" class="timeline-card">
+                  <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px;">
+                    {{ getEventTypeName(event.eventType) }}
+                    <el-tag v-if="event.cycleIndex" size="small" style="margin-left: 8px;">
+                      第{{ event.cycleIndex }}周期
+                    </el-tag>
+                  </div>
+                  <div style="font-size: 13px; color: #606266;">
+                    <p v-if="event.fromLocation || event.toLocation">
+                      <strong>位置：</strong>
+                      <span v-if="event.fromLocation && event.toLocation">
+                        {{ event.fromLocation }} → {{ event.toLocation }}
+                      </span>
+                      <span v-else-if="event.toLocation">{{ event.toLocation }}</span>
+                      <span v-else-if="event.fromLocation">{{ event.fromLocation }}</span>
+                    </p>
+                    <p v-if="event.taskNo"><strong>任务号：</strong>{{ event.taskNo }}</p>
+                    <p v-if="event.oldPriority !== undefined && event.newPriority !== undefined">
+                      <strong>优先级：</strong>P{{ event.oldPriority }} → P{{ event.newPriority }}
+                    </p>
+                    <p><strong>操作人：</strong>{{ event.operator }}</p>
+                    <p v-if="event.remarks"><strong>备注：</strong>{{ event.remarks }}</p>
+                  </div>
+                </el-card>
+              </el-timeline-item>
+            </el-timeline>
+            <el-empty v-else description="暂无生命周期记录" :image-size="80" />
+          </div>
+        </el-tab-pane>
+      </el-tabs>
       <template #footer class="no-print">
         <el-button @click="detailVisible = false">关闭</el-button>
-        <el-button type="warning" @click="openAdjustPriorityFromDetail">调整优先级</el-button>
-        <el-button type="primary" @click="createMoveTask">创建移箱任务</el-button>
+        <el-button type="warning" @click="openAdjustPriorityFromDetail" :disabled="selectedContainer?.status === 'out'">调整优先级</el-button>
+        <el-button type="primary" @click="createMoveTask" :disabled="selectedContainer?.status === 'out'">创建移箱任务</el-button>
       </template>
     </el-dialog>
 
@@ -244,6 +318,10 @@ import { useRouter } from 'vue-router'
 import { useYardStore } from '@/stores/yard'
 import type { Container } from '@/types'
 import { ElMessage } from 'element-plus'
+import { 
+  Refresh, Printer, Collection, Grid, TrendCharts, Warning, 
+  Snowflake, WarningFilled, Clock, Search, Document, View
+} from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 
 const router = useRouter()
@@ -256,6 +334,28 @@ const selectedContainer = ref<Container | null>(null)
 const priorityDialogVisible = ref(false)
 const priorityContainer = ref<Container | null>(null)
 const newPriority = ref(3)
+const activeTab = ref('basic')
+
+const searchedDepartedContainer = computed(() => {
+  if (!localSearch.value.trim()) return null
+  const keyword = localSearch.value.trim().toLowerCase()
+  const departed = yardStore.departedContainers.find(c => 
+    c.containerNo.toLowerCase() === keyword
+  )
+  return departed || null
+})
+
+const isExactSearchNoMatch = computed(() => {
+  if (!localSearch.value.trim()) return false
+  const keyword = localSearch.value.trim().toLowerCase()
+  const hasActiveMatch = yardStore.activeContainers.some(c => 
+    c.containerNo.toLowerCase() === keyword
+  )
+  const hasDepartedMatch = yardStore.departedContainers.some(c => 
+    c.containerNo.toLowerCase() === keyword
+  )
+  return !hasActiveMatch && !hasDepartedMatch && displayContainers.value.length === 0
+})
 
 const displayContainers = computed(() => {
   if (!localSearch.value) return yardStore.activeContainers.slice(0, 50)
@@ -267,6 +367,41 @@ const displayContainers = computed(() => {
     c.consignee?.toLowerCase().includes(keyword)
   ).slice(0, 50)
 })
+
+const containerLifecycle = computed(() => {
+  if (!selectedContainer.value) return []
+  return yardStore.getContainerLifecycle(selectedContainer.value.containerNo)
+})
+
+function getEventTypeName(eventType: string): string {
+  const map: Record<string, string> = {
+    arrival: '到场',
+    assign_slot: '分配箱位',
+    adjust_priority: '调整优先级',
+    create_task: '创建任务',
+    complete_task: '完成任务',
+    departure: '离场',
+    re_arrival: '重新到场'
+  }
+  return map[eventType] || eventType
+}
+
+function getEventTypeColor(eventType: string): string {
+  const map: Record<string, string> = {
+    arrival: '#52c41a',
+    assign_slot: '#1890ff',
+    adjust_priority: '#faad14',
+    create_task: '#722ed1',
+    complete_task: '#13c2c2',
+    departure: '#f5222d',
+    re_arrival: '#eb2f96'
+  }
+  return map[eventType] || '#8c8c8c'
+}
+
+function goToImportExport() {
+  router.push('/import-export')
+}
 
 function getZoneTypeTag(type: string) {
   const map: Record<string, string> = {
@@ -329,11 +464,8 @@ function confirmAdjustPriority() {
 }
 
 function viewContainer(container: Container) {
-  if (yardStore.isContainerDeparted(container.containerNo)) {
-    ElMessage.warning('该箱号已离场，不在堆场中')
-    return
-  }
   selectedContainer.value = container
+  activeTab.value = 'basic'
   detailVisible.value = true
 }
 
@@ -446,5 +578,27 @@ onMounted(() => {
 <style scoped>
 .stat-cards {
   margin-bottom: 16px;
+}
+
+.departed-hint-card {
+  margin-bottom: 16px;
+}
+
+.no-match-hint {
+  padding: 40px 0;
+}
+
+.lifecycle-timeline {
+  max-height: 450px;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.timeline-card {
+  margin-bottom: 8px;
+}
+
+.timeline-card :deep(p) {
+  margin: 4px 0;
 }
 </style>

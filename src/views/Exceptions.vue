@@ -53,6 +53,41 @@
       </el-col>
     </el-row>
 
+    <el-card class="card-shadow no-print" style="margin-top: 16px;">
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span>位置状态异常</span>
+          <div style="display: flex; gap: 12px;">
+            <el-button type="primary" @click="checkSlotErrors">
+              <el-icon><Search /></el-icon>
+              <span>立即检测</span>
+            </el-button>
+            <el-button 
+              type="success" 
+              :disabled="detectedSlotErrors.length === 0" 
+              @click="generateSlotExceptions"
+            >
+              <el-icon><Plus /></el-icon>
+              <span>一键生成异常记录</span>
+            </el-button>
+          </div>
+        </div>
+      </template>
+      <el-table :data="detectedSlotErrors" border stripe size="small" max-height="250">
+        <el-table-column prop="containerNo" label="箱号" width="140" />
+        <el-table-column prop="location" label="位置" width="100" align="center" />
+        <el-table-column prop="description" label="问题描述" show-overflow-tooltip />
+        <el-table-column prop="reportedAt" label="检测时间" width="160" align="center" />
+      </el-table>
+      <el-alert 
+        v-if="detectedSlotErrors.length === 0" 
+        title="未检测到位置状态异常" 
+        type="success" 
+        :closable="false" 
+        style="margin-top: 12px;"
+      />
+    </el-card>
+
     <div class="filter-bar no-print" style="margin-top: 16px;">
       <el-select v-model="filterType" placeholder="异常类型" clearable style="width: 160px;">
         <el-option label="破损箱" value="damaged" />
@@ -242,6 +277,7 @@ const handleRemark = ref('')
 const resolveRemark = ref('')
 const typeChart = ref<HTMLElement>()
 const timelineChart = ref<HTMLElement>()
+const detectedSlotErrors = ref<Exception[]>([])
 
 const exceptionForm = reactive({
   exceptionType: 'damaged',
@@ -390,6 +426,33 @@ function handlePrint() {
 
 function printException() {
   window.print()
+}
+
+function checkSlotErrors() {
+  detectedSlotErrors.value = yardStore.checkSlotReleaseErrors()
+  if (detectedSlotErrors.value.length > 0) {
+    ElMessage.info(`检测到 ${detectedSlotErrors.value.length} 个位置状态异常`)
+  } else {
+    ElMessage.success('未检测到位置状态异常')
+  }
+}
+
+function generateSlotExceptions() {
+  if (detectedSlotErrors.value.length === 0) {
+    ElMessage.warning('没有可生成的异常记录')
+    return
+  }
+  detectedSlotErrors.value.forEach(error => {
+    yardStore.createException({
+      exceptionType: 'location_error',
+      severity: 'medium',
+      containerNo: error.containerNo,
+      location: error.location,
+      description: error.description
+    })
+  })
+  ElMessage.success(`已生成 ${detectedSlotErrors.value.length} 条异常记录`)
+  detectedSlotErrors.value = []
 }
 
 function initCharts() {

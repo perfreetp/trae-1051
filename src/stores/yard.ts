@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
-import type { Container, YardZone, MoveTask, ReeferMonitor, Exception, ShiftReport, YardPlan, Slot, ArrivalRecord, DepartureRecord } from '@/types'
+import type { Container, YardZone, MoveTask, ReeferMonitor, Exception, ShiftReport, YardPlan, Slot, ArrivalRecord, DepartureRecord, LifecycleEvent } from '@/types'
 import { 
   mockYardZones, 
   generateMockContainers, 
@@ -11,8 +11,9 @@ import {
   mockYardPlans,
   generateMockSlots
 } from '@/types/mock'
+import dayjs from 'dayjs'
 
-const STORAGE_KEY = 'container_yard_data_v1'
+const STORAGE_KEY = 'container_yard_data_v2'
 
 function loadFromStorage<T>(key: string, defaultValue: T): T {
   try {
@@ -49,6 +50,22 @@ export const useYardStore = defineStore('yard', () => {
   const slotsCache = ref<Record<string, Slot[]>>({})
   const arrivalRecords = ref<ArrivalRecord[]>([])
   const departureRecords = ref<DepartureRecord[]>([])
+  const lifecycleEvents = ref<LifecycleEvent[]>([])
+
+  function addLifecycleEvent(event: Omit<LifecycleEvent, 'id' | 'eventTime'>) {
+    const newEvent: LifecycleEvent = {
+      id: Math.random().toString(36).substring(2, 15),
+      eventTime: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      ...event
+    }
+    lifecycleEvents.value.unshift(newEvent)
+  }
+
+  function getContainerLifecycle(containerNo: string): LifecycleEvent[] {
+    return lifecycleEvents.value
+      .filter(e => e.containerNo.toLowerCase() === containerNo.toLowerCase())
+      .sort((a, b) => new Date(a.eventTime).getTime() - new Date(b.eventTime).getTime())
+  }
 
   function initData() {
     const savedData = loadFromStorage<any>(STORAGE_KEY, null)
@@ -64,6 +81,7 @@ export const useYardStore = defineStore('yard', () => {
       arrivalRecords.value = savedData.arrivalRecords || []
       departureRecords.value = savedData.departureRecords || []
       slotsCache.value = savedData.slotsCache || {}
+      lifecycleEvents.value = savedData.lifecycleEvents || []
     } else {
       containers.value = generateMockContainers(200)
       yardZones.value = mockYardZones
@@ -74,7 +92,7 @@ export const useYardStore = defineStore('yard', () => {
       yardPlans.value = mockYardPlans
       
       if (arrivalRecords.value.length === 0) {
-        const arrived = containers.value.slice(0, 8)
+        const arrived = containers.value.filter(c => c.status !== 'out').slice(0, 8)
         arrivalRecords.value = arrived.map((c, i) => ({
           id: `ARR${i.toString().padStart(4, '0')}`,
           containerNo: c.containerNo,
@@ -84,21 +102,25 @@ export const useYardStore = defineStore('yard', () => {
           location: c.location,
           arrivalTime: c.arrivalTime,
           operator: ['张三', '李四', '王五'][i % 3],
-          remarks: ''
+          remarks: '',
+          cycleIndex: c.cycleIndex,
+          isReArrival: c.cycleIndex > 1
         }))
       }
       if (departureRecords.value.length === 0) {
-        const departed = containers.value.slice(10, 16)
+        const departed = containers.value.filter(c => c.status === 'out').slice(0, 6)
         departureRecords.value = departed.map((c, i) => ({
           id: `DEP${i.toString().padStart(4, '0')}`,
           containerNo: c.containerNo,
           size: c.size,
           vesselName: c.vesselName || '未知',
           blNo: c.blNo,
-          fromLocation: c.location,
+          fromLocation: c.location || '未知',
           departureTime: c.departureTime || new Date(Date.now() - (i + 1) * 3600000).toISOString().slice(0, 19).replace('T', ' '),
           operator: ['李四', '王五', '赵六'][i % 3],
-          remarks: ''
+          remarks: '',
+          cycleIndex: c.cycleIndex,
+          hasReArrived: false
         }))
       }
       
@@ -121,6 +143,16 @@ export const useYardStore = defineStore('yard', () => {
           slotsCache.value[zone.zoneCode] = slots
         }
       })
+      
+      containers.value.filter(c => c.status !== 'out').forEach(c => {
+        addLifecycleEvent({
+          containerNo: c.containerNo,
+          eventType: 'arrival',
+          operator: '系统初始化',
+          toLocation: c.location,
+          cycleIndex: c.cycleIndex
+        })
+      })
     }
     
     hasInitialized.value = true
@@ -139,6 +171,7 @@ export const useYardStore = defineStore('yard', () => {
       arrivalRecords: arrivalRecords.value,
       departureRecords: departureRecords.value,
       slotsCache: slotsCache.value,
+      lifecycleEvents: lifecycleEvents.value,
       savedAt: new Date().toISOString()
     }
     saveToStorage(STORAGE_KEY, data)
@@ -158,6 +191,7 @@ export const useYardStore = defineStore('yard', () => {
   })
   
   const activeContainers = computed(() => containers.value.filter(c => c.status !== 'out'))
+  const departedContainers = computed(() => containers.value.filter(c => c.status === 'out'))
   const totalContainers = computed(() => activeContainers.value.length)
   const reeferCount = computed(() => activeContainers.value.filter(c => c.isReefer).length)
   const hazardousCount = computed(() => activeContainers.value.filter(c => c.isHazardous).length)
@@ -190,9 +224,21 @@ export const useYardStore = defineStore('yard', () => {
     })
   }
 
+  function findDepartedContainerByNo(containerNo: string): Container | undefined {
+    return containers.value.find(c => 
+      c.status === 'out' && c.containerNo.toLowerCase() === containerNo.toLowerCase()
+    )
+  }
+
   function isContainerDeparted(containerNo: string): boolean {
     const c = containers.value.find(c => c.containerNo.toLowerCase() === containerNo.toLowerCase())
     return c ? c.status === 'out' : false
+  }
+
+  function getDepartureInfo(containerNo: string): DepartureRecord | undefined {
+    return departureRecords.value
+      .filter(r => r.containerNo.toLowerCase() === containerNo.toLowerCase())
+      .sort((a, b) => new Date(b.departureTime).getTime() - new Date(a.departureTime).getTime())[0]
   }
 
   function getZoneSlots(zoneCode: string): Slot[] {
@@ -225,6 +271,45 @@ export const useYardStore = defineStore('yard', () => {
     return slot ? slot.isOccupied : false
   }
 
+  function checkSlotReleaseErrors(): Exception[] {
+    const errors: Exception[] = []
+    departureRecords.value.forEach(rec => {
+      const c = findContainerByNo(rec.containerNo, true)
+      if (c && c.status === 'out' && rec.fromLocation && rec.fromLocation !== '未知') {
+        const zoneCode = rec.fromLocation.charAt(0)
+        const slots = slotsCache.value[zoneCode]
+        if (slots) {
+          const bay = parseInt(rec.fromLocation.charAt(1))
+          const row = parseInt(rec.fromLocation.charAt(2))
+          const tier = parseInt(rec.fromLocation.charAt(3))
+          const slot = slots.find(s => s.bay === bay && s.row === row && s.tier === tier)
+          if (slot?.isOccupied && slot.containerNo?.toLowerCase() === rec.containerNo.toLowerCase()) {
+            const existingEx = exceptions.value.find(e => 
+              e.exceptionType === 'location_error' && 
+              e.containerNo?.toLowerCase() === rec.containerNo.toLowerCase() &&
+              e.status !== 'closed'
+            )
+            if (!existingEx) {
+              errors.push({
+                id: Math.random().toString(36).substring(2, 15),
+                exceptionNo: `EX${new Date().toISOString().slice(0, 10).replace(/-/g, '')}${(exceptions.value.length + 1).toString().padStart(4, '0')}`,
+                exceptionType: 'location_error',
+                severity: 'medium',
+                containerNo: rec.containerNo,
+                location: rec.fromLocation,
+                description: `箱号 ${rec.containerNo} 已离场但原箱位 ${rec.fromLocation} 仍显示占用`,
+                status: 'open',
+                reportedBy: '系统检测',
+                reportedAt: new Date().toISOString().slice(0, 19).replace('T', ' ')
+              })
+            }
+          }
+        }
+      }
+    })
+    return errors
+  }
+
   function createMoveTask(task: Partial<MoveTask> & { containerNo: string }): { success: boolean; message: string; task?: MoveTask } {
     if (isContainerDeparted(task.containerNo)) {
       return { success: false, message: '该箱号已离场，需要先重新登记到场后才能创建作业任务' }
@@ -248,14 +333,57 @@ export const useYardStore = defineStore('yard', () => {
       ...task
     }
     moveTasks.value.unshift(newTask)
+    
+    addLifecycleEvent({
+      containerNo: task.containerNo,
+      eventType: 'create_task',
+      operator: '当前用户',
+      fromLocation: newTask.fromLocation,
+      toLocation: newTask.toLocation,
+      taskNo: newTask.taskNo,
+      taskType: newTask.taskType,
+      remarks: `创建${getTaskTypeName(newTask.taskType)}任务`
+    })
+    
     saveAll()
     return { success: true, message: '任务创建成功', task: newTask }
+  }
+
+  function getTaskTypeName(type: string): string {
+    const map: Record<string, string> = {
+      move: '移箱',
+      lift: '吊装',
+      stack: '堆码',
+      retrieve: '提箱'
+    }
+    return map[type] || type
+  }
+
+  function getContainerTasks(containerNo: string): MoveTask[] {
+    return moveTasks.value
+      .filter(t => t.containerNo.toLowerCase() === containerNo.toLowerCase())
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
   }
 
   function updateMoveTask(taskNo: string, updates: Partial<MoveTask>) {
     const index = moveTasks.value.findIndex(t => t.taskNo === taskNo)
     if (index !== -1) {
+      const oldStatus = moveTasks.value[index].status
       moveTasks.value[index] = { ...moveTasks.value[index], ...updates }
+      
+      if (updates.status === 'completed' && oldStatus !== 'completed') {
+        addLifecycleEvent({
+          containerNo: moveTasks.value[index].containerNo,
+          eventType: 'complete_task',
+          operator: updates.assignedTo || '当前用户',
+          taskNo: taskNo,
+          taskType: moveTasks.value[index].taskType,
+          fromLocation: moveTasks.value[index].fromLocation,
+          toLocation: moveTasks.value[index].toLocation,
+          remarks: '任务完成'
+        })
+      }
+      
       saveAll()
     }
   }
@@ -324,6 +452,7 @@ export const useYardStore = defineStore('yard', () => {
       }
     }
     
+    const oldLocation = container.location
     if (container.location && container.bay && container.row && container.tier) {
       const oldZone = container.location.charAt(0)
       releaseSlot(oldZone, container.bay, container.row, container.tier)
@@ -344,6 +473,15 @@ export const useYardStore = defineStore('yard', () => {
     container.row = row
     container.tier = tier
     container.updatedAt = new Date().toISOString().slice(0, 19).replace('T', ' ')
+    
+    addLifecycleEvent({
+      containerNo,
+      eventType: 'assign_slot',
+      operator: '当前用户',
+      fromLocation: oldLocation,
+      toLocation: location,
+      cycleIndex: container.cycleIndex
+    })
     
     saveAll()
     return { success: true, message: '箱位分配成功', container }
@@ -417,6 +555,24 @@ export const useYardStore = defineStore('yard', () => {
       existing.arrivalTime = new Date().toISOString().slice(0, 19).replace('T', ' ')
       existing.departureTime = undefined
       existing.updatedAt = new Date().toISOString().slice(0, 19).replace('T', ' ')
+      existing.totalCycles = existing.totalCycles + 1
+      existing.cycleIndex = existing.totalCycles
+      
+      const lastDep = departureRecords.value.find(r => r.containerNo.toLowerCase() === container.containerNo.toLowerCase())
+      if (lastDep) {
+        lastDep.hasReArrived = true
+        lastDep.reArrivalTime = existing.arrivalTime
+      }
+      
+      addLifecycleEvent({
+        containerNo: container.containerNo,
+        eventType: 're_arrival',
+        operator: '当前用户',
+        toLocation: '',
+        cycleIndex: existing.cycleIndex,
+        remarks: `第${existing.cycleIndex}次入场`
+      })
+      
       saveAll()
       return { success: true, message: '已重新登记到场', container: existing }
     }
@@ -448,9 +604,21 @@ export const useYardStore = defineStore('yard', () => {
       isOverdue: false,
       overdueDays: 0,
       createdAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
-      updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' ')
+      updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      cycleIndex: 1,
+      totalCycles: 1
     }
     containers.value.unshift(newContainer)
+    
+    addLifecycleEvent({
+      containerNo: container.containerNo,
+      eventType: 'arrival',
+      operator: '当前用户',
+      toLocation: '',
+      cycleIndex: 1,
+      remarks: '首次入场'
+    })
+    
     saveAll()
     return { success: true, message: '登记到场成功', container: newContainer }
   }
@@ -461,6 +629,8 @@ export const useYardStore = defineStore('yard', () => {
       return { success: false, message: '箱号不存在或已离场' }
     }
     
+    const oldLocation = container.location
+    
     if (container.location && container.bay && container.row && container.tier) {
       const zoneCode = container.location.charAt(0)
       releaseSlot(zoneCode, container.bay, container.row, container.tier)
@@ -470,15 +640,79 @@ export const useYardStore = defineStore('yard', () => {
     container.departureTime = new Date().toISOString().slice(0, 19).replace('T', ' ')
     container.updatedAt = new Date().toISOString().slice(0, 19).replace('T', ' ')
     
+    addLifecycleEvent({
+      containerNo,
+      eventType: 'departure',
+      operator: '当前用户',
+      fromLocation: oldLocation,
+      cycleIndex: container.cycleIndex,
+      remarks: `第${container.cycleIndex}次离场`
+    })
+    
     saveAll()
     return { success: true, message: '登记离场成功', container }
+  }
+
+  function batchDeparture(containerNos: string[]): { 
+    success: string[]
+    failed: { containerNo: string; reason: string }[]
+  } {
+    const result = {
+      success: [] as string[],
+      failed: [] as { containerNo: string; reason: string }[]
+    }
+    
+    containerNos.forEach(no => {
+      const trimmed = no.trim()
+      if (!trimmed) return
+      
+      if (isContainerDeparted(trimmed)) {
+        result.failed.push({ containerNo: trimmed, reason: '已离场' })
+        return
+      }
+      
+      const container = findContainerByNo(trimmed)
+      if (!container) {
+        result.failed.push({ containerNo: trimmed, reason: '箱号不存在' })
+        return
+      }
+      
+      const depResult = recordContainerDeparture(trimmed)
+      if (depResult.success) {
+        result.success.push(trimmed)
+        createDepartureRecord({
+          containerNo: trimmed,
+          size: container.size,
+          vesselName: container.vesselName || '',
+          blNo: container.blNo,
+          fromLocation: container.location,
+          operator: '当前用户',
+          cycleIndex: container.cycleIndex
+        })
+      } else {
+        result.failed.push({ containerNo: trimmed, reason: depResult.message })
+      }
+    })
+    
+    return result
   }
 
   function adjustContainerPriority(containerNo: string, priority: number): boolean {
     const container = findContainerByNo(containerNo, true)
     if (container) {
+      const oldPriority = container.priority
       container.priority = priority
       container.updatedAt = new Date().toISOString().slice(0, 19).replace('T', ' ')
+      
+      addLifecycleEvent({
+        containerNo,
+        eventType: 'adjust_priority',
+        operator: '当前用户',
+        oldPriority,
+        newPriority: priority,
+        remarks: `优先级从 P${oldPriority} 调整为 P${priority}`
+      })
+      
       saveAll()
       return true
     }
@@ -495,7 +729,9 @@ export const useYardStore = defineStore('yard', () => {
       location: record.location || '',
       arrivalTime: record.arrivalTime || new Date().toISOString().slice(0, 19).replace('T', ' '),
       operator: record.operator || '当前用户',
-      remarks: record.remarks
+      remarks: record.remarks,
+      cycleIndex: record.cycleIndex,
+      isReArrival: record.isReArrival
     }
     arrivalRecords.value.unshift(newRecord)
     saveAll()
@@ -512,16 +748,70 @@ export const useYardStore = defineStore('yard', () => {
       fromLocation: record.fromLocation || '',
       departureTime: record.departureTime || new Date().toISOString().slice(0, 19).replace('T', ' '),
       operator: record.operator || '当前用户',
-      remarks: record.remarks
+      remarks: record.remarks,
+      cycleIndex: record.cycleIndex,
+      hasReArrived: false
     }
     departureRecords.value.unshift(newRecord)
     saveAll()
     return newRecord
   }
 
+  function getTurnoverStats(period: 'day' | 'week' | 'month', zoneCode?: string, size?: string) {
+    const days = period === 'day' ? 7 : period === 'week' ? 8 : 30
+    const stats = []
+    
+    for (let i = days - 1; i >= 0; i--) {
+      const date = dayjs().subtract(i, period === 'day' ? 'day' : period === 'week' ? 'week' : 'month')
+      const dateStr = date.format(period === 'day' ? 'YYYY-MM-DD' : period === 'week' ? 'YYYY年第WW周' : 'YYYY-MM')
+      
+      const arrivals = arrivalRecords.value.filter(r => {
+        if (zoneCode && r.location.charAt(0) !== zoneCode) return false
+        return dayjs(r.arrivalTime).isSame(date, period === 'day' ? 'day' : period === 'week' ? 'week' : 'month')
+      })
+      
+      const departures = departureRecords.value.filter(r => {
+        if (zoneCode && r.fromLocation.charAt(0) !== zoneCode) return false
+        return dayjs(r.departureTime).isSame(date, period === 'day' ? 'day' : period === 'week' ? 'week' : 'month')
+      })
+      
+      const reArrivals = arrivals.filter(a => a.isReArrival).length
+      const activeContainersOnDate = activeContainers.value.filter(c => {
+        const arrDate = dayjs(c.arrivalTime)
+        const depDate = c.departureTime ? dayjs(c.departureTime) : null
+        return arrDate.isBefore(date.endOf(period === 'day' ? 'day' : period === 'week' ? 'week' : 'month')) &&
+               (!depDate || depDate.isAfter(date.startOf(period === 'day' ? 'day' : period === 'week' ? 'week' : 'month')))
+      })
+      
+      const avgStayDays = activeContainersOnDate.length > 0
+        ? activeContainersOnDate.reduce((sum, c) => {
+            const start = dayjs(c.arrivalTime)
+            const end = c.departureTime ? dayjs(c.departureTime) : dayjs()
+            return sum + end.diff(start, 'day')
+          }, 0) / activeContainersOnDate.length
+        : 0
+      
+      const overdueCount = departures.filter(d => {
+        const c = findContainerByNo(d.containerNo, true)
+        return c && c.isOverdue
+      }).length
+      
+      stats.push({
+        date: dateStr,
+        arrivals: arrivals.length,
+        departures: departures.length,
+        reArrivals,
+        avgStayDays: avgStayDays.toFixed(1),
+        overdueCount
+      })
+    }
+    
+    return stats
+  }
+
   initData()
 
-  watch([containers, moveTasks, arrivalRecords, departureRecords, slotsCache, yardZones], () => {
+  watch([containers, moveTasks, arrivalRecords, departureRecords, slotsCache, yardZones, lifecycleEvents], () => {
     saveAll()
   }, { deep: true })
 
@@ -538,6 +828,7 @@ export const useYardStore = defineStore('yard', () => {
     slotsCache,
     arrivalRecords,
     departureRecords,
+    lifecycleEvents,
     totalSlots,
     occupiedSlots,
     utilizationRate,
@@ -553,10 +844,16 @@ export const useYardStore = defineStore('yard', () => {
     reeferAlarms,
     filteredContainers,
     activeContainers,
+    departedContainers,
     findContainerByNo,
+    findDepartedContainerByNo,
     isContainerDeparted,
+    getDepartureInfo,
+    getContainerLifecycle,
+    getContainerTasks,
     getZoneSlots,
     isSlotOccupied,
+    checkSlotReleaseErrors,
     createMoveTask,
     updateMoveTask,
     createException,
@@ -568,10 +865,13 @@ export const useYardStore = defineStore('yard', () => {
     optimizeMoveTasks,
     recordContainerArrival,
     recordContainerDeparture,
+    batchDeparture,
     adjustContainerPriority,
     createArrivalRecord,
     createDepartureRecord,
+    getTurnoverStats,
     saveAll,
-    releaseSlot
+    releaseSlot,
+    getTaskTypeName
   }
 })

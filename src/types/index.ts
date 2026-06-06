@@ -1,3 +1,29 @@
+export interface LifecycleEvent {
+  id: string
+  containerNo: string
+  eventType: 'arrival' | 'assign_slot' | 'adjust_priority' | 'create_task' | 'complete_task' | 'departure' | 're_arrival'
+  eventTime: string
+  operator: string
+  fromLocation?: string
+  toLocation?: string
+  taskNo?: string
+  taskType?: string
+  oldPriority?: number
+  newPriority?: number
+  remarks?: string
+  cycleIndex?: number
+}
+
+export interface ContainerCycle {
+  cycleIndex: number
+  arrivalTime: string
+  departureTime?: string
+  arrivalLocation?: string
+  departureLocation?: string
+  vesselName?: string
+  isCurrent: boolean
+}
+
 export interface Container {
   id: string
   containerNo: string
@@ -27,6 +53,8 @@ export interface Container {
   overdueDays?: number
   createdAt: string
   updatedAt: string
+  cycleIndex: number
+  totalCycles: number
 }
 
 export interface YardZone {
@@ -176,6 +204,8 @@ export interface ArrivalRecord {
   arrivalTime: string
   operator: string
   remarks?: string
+  cycleIndex?: number
+  isReArrival?: boolean
 }
 
 export interface DepartureRecord {
@@ -188,6 +218,9 @@ export interface DepartureRecord {
   departureTime: string
   operator: string
   remarks?: string
+  cycleIndex?: number
+  hasReArrived?: boolean
+  reArrivalTime?: string
 }
 
 export interface OperationLog {

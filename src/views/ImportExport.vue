@@ -15,6 +15,10 @@
           <el-icon><Upload /></el-icon>
           <span>登记离场</span>
         </el-button>
+        <el-button type="info" @click="showBatchDepartureDialog = true">
+          <el-icon><DocumentCopy /></el-icon>
+          <span>批量离场</span>
+        </el-button>
         <el-button @click="handlePrint">
           <el-icon><Printer /></el-icon>
           <span>打印</span>
@@ -135,10 +139,43 @@
         <el-card class="card-shadow">
           <template #header>
             <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span>离港记录 ({{ yardStore.departureRecords.length }})</span>
+              <span>离港记录 ({{ filteredDepartureRecords.length }})</span>
             </div>
           </template>
-          <el-table :data="yardStore.departureRecords" border stripe max-height="350">
+          <div class="departure-filter-bar no-print">
+            <el-input v-model="departureFilter.containerNo" placeholder="箱号" clearable style="width: 120px;" size="small" />
+            <el-date-picker
+              v-model="departureFilter.departureTimeRange"
+              type="datetimerange"
+              range-separator="至"
+              start-placeholder="开始时间"
+              end-placeholder="结束时间"
+              value-format="YYYY-MM-DD HH:mm:ss"
+              style="width: 280px;"
+              size="small"
+            />
+            <el-input v-model="departureFilter.vesselName" placeholder="船名" clearable style="width: 120px;" size="small" />
+            <el-select v-model="departureFilter.operator" placeholder="操作员" clearable style="width: 110px;" size="small">
+              <el-option v-for="op in operatorOptions" :key="op" :label="op" :value="op" />
+            </el-select>
+            <el-button type="primary" size="small" @click="applyDepartureFilter">
+              <el-icon><Search /></el-icon>
+              筛选
+            </el-button>
+            <el-button size="small" @click="resetDepartureFilter">
+              <el-icon><RefreshRight /></el-icon>
+              重置
+            </el-button>
+          </div>
+          <el-table 
+            :data="filteredDepartureRecords" 
+            border 
+            stripe 
+            max-height="350" 
+            style="margin-top: 10px;"
+            @row-click="viewDepartureDetail"
+            highlight-current-row
+          >
             <el-table-column prop="containerNo" label="箱号" width="140" />
             <el-table-column prop="size" label="尺寸" width="90" align="center" />
             <el-table-column prop="vesselName" label="船名" width="120" />
@@ -146,8 +183,9 @@
             <el-table-column prop="departureTime" label="离场时间" width="160" />
             <el-table-column prop="operator" label="操作员" width="100" />
             <el-table-column label="状态" width="90" align="center">
-              <template #default>
-                <el-tag type="info" size="small">已离场</el-tag>
+              <template #default="{ row }">
+                <el-tag v-if="row.hasReArrived" type="warning" size="small">已重进场</el-tag>
+                <el-tag v-else type="info" size="small">已离场</el-tag>
               </template>
             </el-table-column>
           </el-table>
@@ -296,13 +334,134 @@
         <el-button type="primary" @click="printPlan">打印计划单</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="showDepartureDetailDialog" title="离港记录详情" width="750px">
+      <el-descriptions v-if="selectedDepartureRecord" :column="2" border>
+        <el-descriptions-item label="箱号">{{ selectedDepartureRecord.containerNo }}</el-descriptions-item>
+        <el-descriptions-item label="尺寸">{{ selectedDepartureRecord.size }}</el-descriptions-item>
+        <el-descriptions-item label="船名">{{ selectedDepartureRecord.vesselName }}</el-descriptions-item>
+        <el-descriptions-item label="提单号">{{ selectedDepartureRecord.blNo || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="离场前最后箱位">{{ selectedDepartureRecord.fromLocation }}</el-descriptions-item>
+        <el-descriptions-item label="离场时间">{{ selectedDepartureRecord.departureTime }}</el-descriptions-item>
+        <el-descriptions-item label="登记人">{{ selectedDepartureRecord.operator }}</el-descriptions-item>
+        <el-descriptions-item label="备注">{{ selectedDepartureRecord.remarks || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="是否重新到场" :span="2">
+          <el-tag v-if="selectedDepartureRecord.hasReArrived" type="success">
+            是，重新到场时间：{{ selectedDepartureRecord.reArrivalTime }}
+          </el-tag>
+          <el-tag v-else type="info">否</el-tag>
+        </el-descriptions-item>
+      </el-descriptions>
+      
+      <el-divider content-position="left">生命周期时间线</el-divider>
+      <div class="lifecycle-timeline">
+        <el-timeline>
+          <el-timeline-item
+            v-for="event in containerLifecycle"
+            :key="event.id"
+            :timestamp="event.eventTime"
+            placement="top"
+          >
+            <el-card shadow="hover">
+              <h4>{{ getEventTypeName(event.eventType) }}</h4>
+              <p>操作员：{{ event.operator }}</p>
+              <p v-if="event.fromLocation">原位置：{{ event.fromLocation }}</p>
+              <p v-if="event.toLocation">目标位置：{{ event.toLocation }}</p>
+              <p v-if="event.taskNo">任务编号：{{ event.taskNo }}</p>
+              <p v-if="event.remarks">备注：{{ event.remarks }}</p>
+            </el-card>
+          </el-timeline-item>
+        </el-timeline>
+      </div>
+      
+      <template #footer>
+        <el-button @click="showDepartureDetailDialog = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showBatchDepartureDialog" title="批量离场登记" width="700px">
+      <el-alert
+        title="请输入多个箱号，支持一行一个或逗号分隔"
+        type="info"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 15px;"
+      />
+      <el-input
+        v-model="batchDepartureInput"
+        type="textarea"
+        :rows="5"
+        placeholder="例如：
+CBHU1234567
+MSKU9876543
+或：CBHU1234567, MSKU9876543"
+      />
+      <div style="margin-top: 15px;">
+        <el-button type="primary" @click="validateBatchContainers" :loading="validating">
+          <el-icon><Check /></el-icon>
+          校验
+        </el-button>
+        <el-button 
+          type="warning" 
+          @click="confirmBatchDeparture" 
+          :disabled="!batchValidationResult || batchValidationResult.available.length === 0"
+          :loading="departing"
+        >
+          <el-icon><Upload /></el-icon>
+          确认离场
+        </el-button>
+      </div>
+      
+      <el-divider v-if="batchValidationResult" />
+      
+      <div v-if="batchValidationResult">
+        <h4 style="margin-bottom: 10px;">校验结果</h4>
+        <el-table :data="batchValidationResult.details" border stripe size="small">
+          <el-table-column prop="containerNo" label="箱号" width="180" />
+          <el-table-column label="状态" width="120" align="center">
+            <template #default="{ row }">
+              <el-tag v-if="row.status === 'available'" type="success">在场</el-tag>
+              <el-tag v-else-if="row.status === 'departed'" type="info">已离场</el-tag>
+              <el-tag v-else type="danger">不存在</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="message" label="说明" />
+        </el-table>
+        <div style="margin-top: 10px; color: #666;">
+          共 {{ batchValidationResult.details.length }} 个箱号，
+          可离场：<span style="color: #67c23a; font-weight: bold;">{{ batchValidationResult.available.length }}</span> 个，
+          不可离场：<span style="color: #f56c6c; font-weight: bold;">{{ batchValidationResult.unavailable.length }}</span> 个
+        </div>
+      </div>
+      
+      <el-divider v-if="batchDepartureResult" />
+      
+      <div v-if="batchDepartureResult">
+        <h4 style="margin-bottom: 10px;">执行结果</h4>
+        <el-alert
+          :title="`成功 ${batchDepartureResult.success.length} 个，失败 ${batchDepartureResult.failed.length} 个`"
+          :type="batchDepartureResult.failed.length === 0 ? 'success' : 'warning'"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 10px;"
+        />
+        <el-table v-if="batchDepartureResult.failed.length > 0" :data="batchDepartureResult.failed" border stripe size="small">
+          <el-table-column prop="containerNo" label="箱号" width="180" />
+          <el-table-column prop="reason" label="失败原因" />
+        </el-table>
+      </div>
+      
+      <template #footer>
+        <el-button @click="closeBatchDepartureDialog">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, reactive } from 'vue'
 import { useYardStore } from '@/stores/yard'
-import type { YardPlan, Container } from '@/types'
+import type { YardPlan, Container, DepartureRecord, LifecycleEvent } from '@/types'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 
@@ -318,6 +477,77 @@ const showDepartureDialog = ref(false)
 const selectedPlan = ref<YardPlan | null>(null)
 const departureContainer = ref<Container | null>(null)
 const slotOccupiedWarning = ref('')
+
+const showDepartureDetailDialog = ref(false)
+const showBatchDepartureDialog = ref(false)
+const selectedDepartureRecord = ref<DepartureRecord | null>(null)
+const batchDepartureInput = ref('')
+const validating = ref(false)
+const departing = ref(false)
+const batchValidationResult = ref<{
+  details: { containerNo: string; status: 'available' | 'departed' | 'not_found'; message: string }[]
+  available: string[]
+  unavailable: string[]
+} | null>(null)
+const batchDepartureResult = ref<{
+  success: string[]
+  failed: { containerNo: string; reason: string }[]
+} | null>(null)
+
+const departureFilter = reactive({
+  containerNo: '',
+  departureTimeRange: [] as string[],
+  vesselName: '',
+  operator: ''
+})
+
+const departureFilterApplied = reactive({
+  containerNo: '',
+  departureTimeRange: [] as string[],
+  vesselName: '',
+  operator: ''
+})
+
+const operatorOptions = computed(() => {
+  const operators = new Set<string>()
+  yardStore.departureRecords.forEach(r => {
+    if (r.operator) operators.add(r.operator)
+  })
+  return Array.from(operators)
+})
+
+const filteredDepartureRecords = computed(() => {
+  let records = [...yardStore.departureRecords]
+  
+  if (departureFilterApplied.containerNo) {
+    const keyword = departureFilterApplied.containerNo.toLowerCase()
+    records = records.filter(r => r.containerNo.toLowerCase().includes(keyword))
+  }
+  
+  if (departureFilterApplied.departureTimeRange && departureFilterApplied.departureTimeRange.length === 2) {
+    const [start, end] = departureFilterApplied.departureTimeRange
+    records = records.filter(r => {
+      const time = dayjs(r.departureTime)
+      return time.isAfter(dayjs(start)) && time.isBefore(dayjs(end).endOf('day'))
+    })
+  }
+  
+  if (departureFilterApplied.vesselName) {
+    const keyword = departureFilterApplied.vesselName.toLowerCase()
+    records = records.filter(r => r.vesselName.toLowerCase().includes(keyword))
+  }
+  
+  if (departureFilterApplied.operator) {
+    records = records.filter(r => r.operator === departureFilterApplied.operator)
+  }
+  
+  return records
+})
+
+const containerLifecycle = computed((): LifecycleEvent[] => {
+  if (!selectedDepartureRecord.value) return []
+  return yardStore.getContainerLifecycle(selectedDepartureRecord.value.containerNo)
+})
 
 const planForm = reactive({
   planType: 'import',
@@ -644,4 +874,148 @@ function handlePrint() {
 function printPlan() {
   window.print()
 }
+
+function applyDepartureFilter() {
+  departureFilterApplied.containerNo = departureFilter.containerNo
+  departureFilterApplied.departureTimeRange = [...departureFilter.departureTimeRange]
+  departureFilterApplied.vesselName = departureFilter.vesselName
+  departureFilterApplied.operator = departureFilter.operator
+  ElMessage.success(`筛选完成，共找到 ${filteredDepartureRecords.value.length} 条记录`)
+}
+
+function resetDepartureFilter() {
+  departureFilter.containerNo = ''
+  departureFilter.departureTimeRange = []
+  departureFilter.vesselName = ''
+  departureFilter.operator = ''
+  departureFilterApplied.containerNo = ''
+  departureFilterApplied.departureTimeRange = []
+  departureFilterApplied.vesselName = ''
+  departureFilterApplied.operator = ''
+  ElMessage.info('已重置筛选条件')
+}
+
+function viewDepartureDetail(row: DepartureRecord) {
+  selectedDepartureRecord.value = row
+  showDepartureDetailDialog.value = true
+}
+
+function getEventTypeName(type: string): string {
+  const map: Record<string, string> = {
+    arrival: '到场登记',
+    assign_slot: '分配箱位',
+    adjust_priority: '调整优先级',
+    create_task: '创建作业任务',
+    complete_task: '完成作业任务',
+    departure: '离场登记',
+    re_arrival: '重新到场'
+  }
+  return map[type] || type
+}
+
+function validateBatchContainers() {
+  if (!batchDepartureInput.value.trim()) {
+    ElMessage.warning('请输入箱号')
+    return
+  }
+  
+  validating.value = true
+  batchValidationResult.value = null
+  batchDepartureResult.value = null
+  
+  setTimeout(() => {
+    const input = batchDepartureInput.value
+    const containerNos = input
+      .split(/[\n,，]/)
+      .map(s => s.trim())
+      .filter(s => s.length > 0)
+    
+    const details: { containerNo: string; status: 'available' | 'departed' | 'not_found'; message: string }[] = []
+    const available: string[] = []
+    const unavailable: string[] = []
+    
+    containerNos.forEach(no => {
+      if (yardStore.isContainerDeparted(no)) {
+        details.push({ containerNo: no, status: 'departed', message: '该箱号已离场' })
+        unavailable.push(no)
+      } else {
+        const container = yardStore.findContainerByNo(no)
+        if (container) {
+          details.push({ containerNo: no, status: 'available', message: `可离场，当前位置：${container.location}` })
+          available.push(no)
+        } else {
+          details.push({ containerNo: no, status: 'not_found', message: '箱号不存在' })
+          unavailable.push(no)
+        }
+      }
+    })
+    
+    batchValidationResult.value = { details, available, unavailable }
+    validating.value = false
+  }, 300)
+}
+
+function confirmBatchDeparture() {
+  if (!batchValidationResult.value || batchValidationResult.value.available.length === 0) {
+    ElMessage.warning('没有可离场的箱号')
+    return
+  }
+  
+  ElMessageBox.confirm(
+    `确认对 ${batchValidationResult.value.available.length} 个在场箱执行离场操作？`,
+    '提示',
+    {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }
+  ).then(() => {
+    departing.value = true
+    
+    setTimeout(() => {
+      const result = yardStore.batchDeparture(batchValidationResult.value!.available)
+      batchDepartureResult.value = result
+      departing.value = false
+      
+      if (result.failed.length === 0) {
+        ElMessage.success(`成功登记 ${result.success.length} 个箱号离场`)
+      } else {
+        ElMessage.warning(`成功 ${result.success.length} 个，失败 ${result.failed.length} 个`)
+      }
+    }, 500)
+  }).catch(() => {})
+}
+
+function closeBatchDepartureDialog() {
+  showBatchDepartureDialog.value = false
+  batchDepartureInput.value = ''
+  batchValidationResult.value = null
+  batchDepartureResult.value = null
+}
 </script>
+
+<style scoped>
+.departure-filter-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.lifecycle-timeline {
+  max-height: 300px;
+  overflow-y: auto;
+  padding-right: 10px;
+}
+
+.lifecycle-timeline h4 {
+  margin: 0 0 8px 0;
+  color: #409eff;
+}
+
+.lifecycle-timeline p {
+  margin: 4px 0;
+  color: #666;
+  font-size: 13px;
+}
+</style>

@@ -239,6 +239,44 @@
       </el-col>
     </el-row>
 
+    <el-row :gutter="16" style="margin-top: 20px;">
+      <el-col :span="24">
+        <el-card class="card-shadow">
+          <template #header>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span>进出场周转分析</span>
+              <div class="no-print" style="display: flex; gap: 12px; align-items: center;">
+                <el-radio-group v-model="turnoverPeriod" size="default" @change="updateTurnoverChart">
+                  <el-radio-button value="day">日报</el-radio-button>
+                  <el-radio-button value="week">周报</el-radio-button>
+                  <el-radio-button value="month">月报</el-radio-button>
+                </el-radio-group>
+                <el-select v-model="turnoverZone" placeholder="箱区筛选" clearable style="width: 120px;" @change="updateTurnoverChart">
+                  <el-option v-for="zone in yardStore.yardZones" :key="zone.zoneCode" :label="zone.zoneName" :value="zone.zoneCode" />
+                </el-select>
+                <el-select v-model="turnoverSize" placeholder="箱型筛选" clearable style="width: 120px;" @change="updateTurnoverChart">
+                  <el-option label="20GP" value="20GP" />
+                  <el-option label="40GP" value="40GP" />
+                  <el-option label="40HQ" value="40HQ" />
+                  <el-option label="20RF" value="20RF" />
+                  <el-option label="40RF" value="40RF" />
+                </el-select>
+              </div>
+            </div>
+          </template>
+          <div ref="turnoverChart" style="height: 350px;"></div>
+          <el-table :data="turnoverStats" border stripe style="margin-top: 16px;">
+            <el-table-column prop="date" label="日期" width="160" />
+            <el-table-column prop="arrivals" label="到场量" width="100" align="center" />
+            <el-table-column prop="departures" label="离场量" width="100" align="center" />
+            <el-table-column prop="reArrivals" label="重新到场量" width="120" align="center" />
+            <el-table-column prop="avgStayDays" label="平均在场天数" width="120" align="center" />
+            <el-table-column prop="overdueCount" label="超期离场数" width="120" align="center" />
+          </el-table>
+        </el-card>
+      </el-col>
+    </el-row>
+
     <el-dialog v-model="priorityDialogVisible" title="调整出箱优先级" width="450px" class="no-print">
       <el-form label-width="100px">
         <el-form-item label="当前箱号">
@@ -282,7 +320,12 @@ const trendChart = ref<HTMLElement>()
 const typeChart = ref<HTMLElement>()
 const zoneChart = ref<HTMLElement>()
 const efficiencyChart = ref<HTMLElement>()
+const turnoverChart = ref<HTMLElement>()
 const priorityDialogVisible = ref(false)
+const turnoverPeriod = ref<'day' | 'week' | 'month'>('day')
+const turnoverZone = ref('')
+const turnoverSize = ref('')
+const turnoverStats = ref<any[]>([])
 const priorityContainer = ref<Container | null>(null)
 const newPriority = ref(3)
 
@@ -360,6 +403,27 @@ function confirmAdjustPriority() {
   }
 }
 
+function updateTurnoverChart() {
+  turnoverStats.value = yardStore.getTurnoverStats(turnoverPeriod.value, turnoverZone.value || undefined, turnoverSize.value || undefined)
+  nextTick(() => {
+    if (turnoverChart.value) {
+      const chart = echarts.getInstanceByDom(turnoverChart.value) || echarts.init(turnoverChart.value)
+      chart.setOption({
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+        legend: { data: ['到场量', '离场量', '重新到场量'] },
+        grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+        xAxis: { type: 'category', data: turnoverStats.value.map(s => s.date) },
+        yAxis: { type: 'value' },
+        series: [
+          { name: '到场量', type: 'bar', data: turnoverStats.value.map(s => s.arrivals), itemStyle: { color: '#1890ff' } },
+          { name: '离场量', type: 'bar', data: turnoverStats.value.map(s => s.departures), itemStyle: { color: '#52c41a' } },
+          { name: '重新到场量', type: 'bar', data: turnoverStats.value.map(s => s.reArrivals), itemStyle: { color: '#fa8c16' } }
+        ]
+      })
+    }
+  })
+}
+
 function initCharts() {
   nextTick(() => {
     if (trendChart.value) {
@@ -433,6 +497,8 @@ function initCharts() {
         ]
       })
     }
+
+    updateTurnoverChart()
   })
 }
 
@@ -443,6 +509,7 @@ onMounted(() => {
     if (typeChart.value) echarts.getInstanceByDom(typeChart.value)?.resize()
     if (zoneChart.value) echarts.getInstanceByDom(zoneChart.value)?.resize()
     if (efficiencyChart.value) echarts.getInstanceByDom(efficiencyChart.value)?.resize()
+    if (turnoverChart.value) echarts.getInstanceByDom(turnoverChart.value)?.resize()
   })
 })
 </script>
