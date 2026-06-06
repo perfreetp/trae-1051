@@ -158,15 +158,21 @@
                 </div>
               </template>
             </el-table-column>
+            <el-table-column label="优先级" width="90" align="center">
+              <template #default="{ row }">
+                <el-tag :type="getPriorityTagType(row.priority)" size="small">P{{ row.priority }}</el-tag>
+              </template>
+            </el-table-column>
             <el-table-column prop="weight" label="重量(kg)" width="110" align="center" />
             <el-table-column prop="vesselName" label="船名" width="120" />
             <el-table-column prop="blNo" label="提单号" width="130" />
             <el-table-column prop="consignee" label="收货人" width="130" show-overflow-tooltip />
             <el-table-column prop="arrivalTime" label="到场时间" width="160" />
-            <el-table-column label="操作" width="120" fixed="right" class="no-print">
+            <el-table-column label="操作" width="180" fixed="right" class="no-print">
               <template #default="{ row }">
                 <el-button type="primary" link size="small" @click="viewContainer(row)">详情</el-button>
                 <el-button type="primary" link size="small" @click="locateOnMap(row)">定位</el-button>
+                <el-button type="warning" link size="small" @click="openAdjustPriority(row)">优先级</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -181,7 +187,9 @@
         <el-descriptions-item label="类型">{{ selectedContainer.type }}</el-descriptions-item>
         <el-descriptions-item label="位置">{{ selectedContainer.location }}</el-descriptions-item>
         <el-descriptions-item label="重量">{{ selectedContainer.weight }} kg</el-descriptions-item>
-        <el-descriptions-item label="优先级">{{ selectedContainer.priority }}</el-descriptions-item>
+        <el-descriptions-item label="优先级">
+          <el-tag :type="getPriorityTagType(selectedContainer.priority)" size="small">P{{ selectedContainer.priority }}</el-tag>
+        </el-descriptions-item>
         <el-descriptions-item label="冷藏箱">{{ selectedContainer.isReefer ? '是' : '否' }}</el-descriptions-item>
         <el-descriptions-item label="危险品">{{ selectedContainer.isHazardous ? '是' : '否' }}</el-descriptions-item>
         <el-descriptions-item v-if="selectedContainer.isHazardous" label="危险品等级">{{ selectedContainer.hazardLevel }}</el-descriptions-item>
@@ -197,7 +205,34 @@
       </el-descriptions>
       <template #footer class="no-print">
         <el-button @click="detailVisible = false">关闭</el-button>
+        <el-button type="warning" @click="openAdjustPriorityFromDetail">调整优先级</el-button>
         <el-button type="primary" @click="createMoveTask">创建移箱任务</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="priorityDialogVisible" title="调整出箱优先级" width="450px" class="no-print">
+      <el-form label-width="100px">
+        <el-form-item label="当前箱号">
+          <span><strong>{{ priorityContainer?.containerNo }}</strong></span>
+        </el-form-item>
+        <el-form-item label="当前优先级">
+          <el-tag v-if="priorityContainer" :type="getPriorityTagType(priorityContainer.priority)">
+            P{{ priorityContainer.priority }}
+          </el-tag>
+        </el-form-item>
+        <el-form-item label="调整为">
+          <el-radio-group v-model="newPriority">
+            <el-radio :value="1">P1 - 最高优先</el-radio>
+            <el-radio :value="2">P2 - 高优先</el-radio>
+            <el-radio :value="3">P3 - 正常</el-radio>
+            <el-radio :value="4">P4 - 低优先</el-radio>
+            <el-radio :value="5">P5 - 最低优先</el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="priorityDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmAdjustPriority">确认调整</el-button>
       </template>
     </el-dialog>
   </div>
@@ -218,6 +253,9 @@ const taskChart = ref<HTMLElement>()
 const localSearch = ref('')
 const detailVisible = ref(false)
 const selectedContainer = ref<Container | null>(null)
+const priorityDialogVisible = ref(false)
+const priorityContainer = ref<Container | null>(null)
+const newPriority = ref(3)
 
 const displayContainers = computed(() => {
   if (!localSearch.value) return yardStore.containers.slice(0, 50)
@@ -256,6 +294,38 @@ function getProgressColor(rate: number) {
   if (rate < 0.6) return '#52c41a'
   if (rate < 0.85) return '#faad14'
   return '#f5222d'
+}
+
+function getPriorityTagType(priority: number) {
+  if (priority <= 1) return 'danger'
+  if (priority <= 2) return 'warning'
+  if (priority <= 3) return ''
+  return 'info'
+}
+
+function openAdjustPriority(container: Container) {
+  priorityContainer.value = container
+  newPriority.value = container.priority
+  priorityDialogVisible.value = true
+}
+
+function openAdjustPriorityFromDetail() {
+  if (selectedContainer.value) {
+    priorityContainer.value = selectedContainer.value
+    newPriority.value = selectedContainer.value.priority
+    priorityDialogVisible.value = true
+  }
+}
+
+function confirmAdjustPriority() {
+  if (priorityContainer.value) {
+    yardStore.adjustContainerPriority(priorityContainer.value.containerNo, newPriority.value)
+    ElMessage.success(`优先级已调整为 P${newPriority.value}`)
+    priorityDialogVisible.value = false
+    if (selectedContainer.value?.containerNo === priorityContainer.value.containerNo) {
+      selectedContainer.value.priority = newPriority.value
+    }
+  }
 }
 
 function viewContainer(container: Container) {

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Container, YardZone, MoveTask, ReeferMonitor, Exception, ShiftReport, YardPlan, Slot } from '@/types'
+import type { Container, YardZone, MoveTask, ReeferMonitor, Exception, ShiftReport, YardPlan, Slot, ArrivalRecord, DepartureRecord } from '@/types'
 import { 
   mockYardZones, 
   generateMockContainers, 
@@ -22,6 +22,9 @@ export const useYardStore = defineStore('yard', () => {
   const yardPlans = ref<YardPlan[]>(mockYardPlans)
   const selectedZone = ref<string>('A')
   const searchKeyword = ref<string>('')
+  const slotsCache = ref<Record<string, Slot[]>>({})
+  const arrivalRecords = ref<ArrivalRecord[]>([])
+  const departureRecords = ref<DepartureRecord[]>([])
 
   const totalSlots = computed(() => yardZones.value.reduce((sum, z) => sum + z.totalSlots, 0))
   const occupiedSlots = computed(() => yardZones.value.reduce((sum, z) => sum + z.occupiedSlots, 0))
@@ -59,7 +62,24 @@ export const useYardStore = defineStore('yard', () => {
   function getZoneSlots(zoneCode: string): Slot[] {
     const zone = yardZones.value.find(z => z.zoneCode === zoneCode)
     if (!zone) return []
-    return generateMockSlots(zone)
+    if (!slotsCache.value[zoneCode]) {
+      const slots = generateMockSlots(zone)
+      containers.value.forEach(c => {
+        if (c.location && c.location.charAt(0) === zoneCode) {
+          const bay = c.bay || parseInt(c.location.charAt(1))
+          const row = c.row || parseInt(c.location.charAt(2))
+          const tier = c.tier || parseInt(c.location.charAt(3))
+          const slotIdx = slots.findIndex(s => s.bay === bay && s.row === row && s.tier === tier)
+          if (slotIdx !== -1) {
+            slots[slotIdx].isOccupied = true
+            slots[slotIdx].containerId = c.id
+            slots[slotIdx].containerNo = c.containerNo
+          }
+        }
+      })
+      slotsCache.value[zoneCode] = slots
+    }
+    return slotsCache.value[zoneCode]
   }
 
   function createMoveTask(task: Partial<MoveTask>): MoveTask {
@@ -118,15 +138,45 @@ export const useYardStore = defineStore('yard', () => {
     }
   }
 
-  function assignSlot(containerNo: string, location: string, zoneCode: string, bay: number, row: number, tier: number) {
-    const container = containers.value.find(c => c.containerNo === containerNo)
-    if (container) {
-      container.location = location
-      container.bay = bay
-      container.row = row
-      container.tier = tier
-      container.updatedAt = new Date().toISOString().slice(0, 19).replace('T', ' ')
+  function assignSlot(containerNo: string, location: string, zoneCode: string, bay: number, row: number, tier: number): { success: boolean; message: string; container?: Container } {
+    let container = containers.value.find(c => c.containerNo.toLowerCase() === containerNo.toLowerCase())
+    
+    if (!container) {
+      return { success: false, message: '箱号不存在，请先登记到场或检查箱号是否正确' }
     }
+    
+    const slots = slotsCache.value[zoneCode]
+    if (slots) {
+      const oldSlotIdx = slots.findIndex(s => s.containerNo === containerNo)
+      if (oldSlotIdx !== -1) {
+        slots[oldSlotIdx].isOccupied = false
+        slots[oldSlotIdx].containerId = undefined
+        slots[oldSlotIdx].containerNo = undefined
+      }
+      
+      const newSlotIdx = slots.findIndex(s => s.bay === bay && s.row === row && s.tier === tier)
+      if (newSlotIdx !== -1) {
+        if (slots[newSlotIdx].isOccupied && slots[newSlotIdx].containerNo !== containerNo) {
+          return { success: false, message: '该箱位已被占用，请选择其他箱位' }
+        }
+        slots[newSlotIdx].isOccupied = true
+        slots[newSlotIdx].containerId = container.id
+        slots[newSlotIdx].containerNo = container.containerNo
+      }
+    }
+    
+    container.location = location
+    container.bay = bay
+    container.row = row
+    container.tier = tier
+    container.updatedAt = new Date().toISOString().slice(0, 19).replace('T', ' ')
+    
+    const zone = yardZones.value.find(z => z.zoneCode === zoneCode)
+    if (zone) {
+      zone.occupiedSlots = slots ? slots.filter(s => s.isOccupied).length : zone.occupiedSlots
+    }
+    
+    return { success: true, message: '箱位分配成功', container }
   }
 
   function findAvailableSlot(container: Partial<Container>): Slot | null {
@@ -230,6 +280,71 @@ export const useYardStore = defineStore('yard', () => {
     return false
   }
 
+  function initRecords() {
+    if (arrivalRecords.value.length === 0) {
+      const arrived = containers.value.slice(0, 8)
+      arrivalRecords.value = arrived.map((c, i) => ({
+        id: `ARR${i.toString().padStart(4, '0')}`,
+        containerNo: c.containerNo,
+        size: c.size,
+        vesselName: c.vesselName || '未知',
+        blNo: c.blNo,
+        location: c.location,
+        arrivalTime: c.arrivalTime,
+        operator: ['张三', '李四', '王五'][i % 3],
+        remarks: ''
+      }))
+    }
+    if (departureRecords.value.length === 0) {
+      const departed = containers.value.slice(10, 16)
+      departureRecords.value = departed.map((c, i) => ({
+        id: `DEP${i.toString().padStart(4, '0')}`,
+        containerNo: c.containerNo,
+        size: c.size,
+        vesselName: c.vesselName || '未知',
+        blNo: c.blNo,
+        fromLocation: c.location,
+        departureTime: c.departureTime || new Date(Date.now() - (i + 1) * 3600000).toISOString().slice(0, 19).replace('T', ' '),
+        operator: ['李四', '王五', '赵六'][i % 3],
+        remarks: ''
+      }))
+    }
+  }
+
+  function createArrivalRecord(record: Partial<ArrivalRecord>): ArrivalRecord {
+    const newRecord: ArrivalRecord = {
+      id: Math.random().toString(36).substring(2, 15),
+      containerNo: record.containerNo || '',
+      size: record.size || '20GP',
+      vesselName: record.vesselName || '',
+      blNo: record.blNo,
+      location: record.location || '',
+      arrivalTime: record.arrivalTime || new Date().toISOString().slice(0, 19).replace('T', ' '),
+      operator: record.operator || '当前用户',
+      remarks: record.remarks
+    }
+    arrivalRecords.value.unshift(newRecord)
+    return newRecord
+  }
+
+  function createDepartureRecord(record: Partial<DepartureRecord>): DepartureRecord {
+    const newRecord: DepartureRecord = {
+      id: Math.random().toString(36).substring(2, 15),
+      containerNo: record.containerNo || '',
+      size: record.size || '20GP',
+      vesselName: record.vesselName || '',
+      blNo: record.blNo,
+      fromLocation: record.fromLocation || '',
+      departureTime: record.departureTime || new Date().toISOString().slice(0, 19).replace('T', ' '),
+      operator: record.operator || '当前用户',
+      remarks: record.remarks
+    }
+    departureRecords.value.unshift(newRecord)
+    return newRecord
+  }
+
+  initRecords()
+
   return {
     containers,
     yardZones,
@@ -240,6 +355,9 @@ export const useYardStore = defineStore('yard', () => {
     yardPlans,
     selectedZone,
     searchKeyword,
+    slotsCache,
+    arrivalRecords,
+    departureRecords,
     totalSlots,
     occupiedSlots,
     utilizationRate,
@@ -267,6 +385,8 @@ export const useYardStore = defineStore('yard', () => {
     optimizeMoveTasks,
     recordContainerArrival,
     recordContainerDeparture,
-    adjustContainerPriority
+    adjustContainerPriority,
+    createArrivalRecord,
+    createDepartureRecord
   }
 })

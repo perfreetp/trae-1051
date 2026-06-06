@@ -7,6 +7,14 @@
           <el-icon><Plus /></el-icon>
           <span>新建计划</span>
         </el-button>
+        <el-button type="success" @click="showArrivalDialog = true">
+          <el-icon><Download /></el-icon>
+          <span>登记到场</span>
+        </el-button>
+        <el-button type="warning" @click="showDepartureDialog = true">
+          <el-icon><Upload /></el-icon>
+          <span>登记离场</span>
+        </el-button>
         <el-button @click="handlePrint">
           <el-icon><Printer /></el-icon>
           <span>打印</span>
@@ -25,7 +33,13 @@
         <el-option label="进行中" value="in_progress" />
         <el-option label="已完成" value="completed" />
       </el-select>
-      <el-date-picker v-model="filterDate" type="date" placeholder="选择日期" style="width: 180px;" />
+      <el-date-picker 
+        v-model="filterDate" 
+        type="date" 
+        placeholder="选择日期" 
+        style="width: 180px;" 
+        value-format="YYYY-MM-DD"
+      />
       <el-button type="primary" @click="handleSearch">
         <el-icon><Search /></el-icon>
         查询
@@ -34,12 +48,15 @@
         <el-icon><RefreshRight /></el-icon>
         重置
       </el-button>
+      <span style="margin-left: 12px; color: #666; font-size: 13px;">
+        共 {{ filteredPlans.length }} 条记录
+      </span>
     </div>
 
     <el-card class="card-shadow">
-      <el-tabs v-model="activeTab">
+      <el-tabs v-model="activeTab" @tab-change="onTabChange">
         <el-tab-pane label="进口计划" name="import">
-          <el-table :data="importPlans" border stripe>
+          <el-table :data="filteredImportPlans" border stripe>
             <el-table-column prop="planNo" label="计划编号" width="180" />
             <el-table-column prop="vesselName" label="船名" width="140" />
             <el-table-column prop="voyageNo" label="航次" width="120" />
@@ -52,7 +69,7 @@
             </el-table-column>
             <el-table-column prop="createdBy" label="创建人" width="120" />
             <el-table-column prop="createdAt" label="创建时间" width="160" />
-            <el-table-column label="操作" width="200" fixed="right" class="no-print">
+            <el-table-column label="操作" width="240" fixed="right" class="no-print">
               <template #default="{ row }">
                 <el-button type="primary" link size="small" @click="viewPlan(row)">查看</el-button>
                 <el-button type="primary" link size="small" @click="editPlan(row)">编辑</el-button>
@@ -61,9 +78,10 @@
               </template>
             </el-table-column>
           </el-table>
+          <el-empty v-if="filteredImportPlans.length === 0" description="暂无进口计划数据" :image-size="80" />
         </el-tab-pane>
         <el-tab-pane label="出口计划" name="export">
-          <el-table :data="exportPlans" border stripe>
+          <el-table :data="filteredExportPlans" border stripe>
             <el-table-column prop="planNo" label="计划编号" width="180" />
             <el-table-column prop="vesselName" label="船名" width="140" />
             <el-table-column prop="voyageNo" label="航次" width="120" />
@@ -76,7 +94,7 @@
             </el-table-column>
             <el-table-column prop="createdBy" label="创建人" width="120" />
             <el-table-column prop="createdAt" label="创建时间" width="160" />
-            <el-table-column label="操作" width="200" fixed="right" class="no-print">
+            <el-table-column label="操作" width="240" fixed="right" class="no-print">
               <template #default="{ row }">
                 <el-button type="primary" link size="small" @click="viewPlan(row)">查看</el-button>
                 <el-button type="primary" link size="small" @click="editPlan(row)">编辑</el-button>
@@ -85,14 +103,20 @@
               </template>
             </el-table-column>
           </el-table>
+          <el-empty v-if="filteredExportPlans.length === 0" description="暂无出口计划数据" :image-size="80" />
         </el-tab-pane>
       </el-tabs>
     </el-card>
 
     <el-row :gutter="16" style="margin-top: 20px;">
       <el-col :span="12">
-        <el-card class="card-shadow" title="到港记录">
-          <el-table :data="arrivalRecords" border stripe max-height="350">
+        <el-card class="card-shadow">
+          <template #header>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span>到港记录 ({{ yardStore.arrivalRecords.length }})</span>
+            </div>
+          </template>
+          <el-table :data="yardStore.arrivalRecords" border stripe max-height="350">
             <el-table-column prop="containerNo" label="箱号" width="140" />
             <el-table-column prop="size" label="尺寸" width="90" align="center" />
             <el-table-column prop="vesselName" label="船名" width="120" />
@@ -108,8 +132,13 @@
         </el-card>
       </el-col>
       <el-col :span="12">
-        <el-card class="card-shadow" title="离港记录">
-          <el-table :data="departureRecords" border stripe max-height="350">
+        <el-card class="card-shadow">
+          <template #header>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span>离港记录 ({{ yardStore.departureRecords.length }})</span>
+            </div>
+          </template>
+          <el-table :data="yardStore.departureRecords" border stripe max-height="350">
             <el-table-column prop="containerNo" label="箱号" width="140" />
             <el-table-column prop="size" label="尺寸" width="90" align="center" />
             <el-table-column prop="vesselName" label="船名" width="120" />
@@ -141,10 +170,10 @@
           <el-input v-model="planForm.voyageNo" placeholder="请输入航次" />
         </el-form-item>
         <el-form-item v-if="planForm.planType === 'import'" label="预计到港">
-          <el-date-picker v-model="planForm.eta" type="datetime" placeholder="选择时间" style="width: 100%;" />
+          <el-date-picker v-model="planForm.eta" type="datetime" placeholder="选择时间" style="width: 100%;" value-format="YYYY-MM-DD HH:mm" />
         </el-form-item>
         <el-form-item v-if="planForm.planType === 'export'" label="预计离港">
-          <el-date-picker v-model="planForm.etd" type="datetime" placeholder="选择时间" style="width: 100%;" />
+          <el-date-picker v-model="planForm.etd" type="datetime" placeholder="选择时间" style="width: 100%;" value-format="YYYY-MM-DD HH:mm" />
         </el-form-item>
         <el-form-item label="集装箱数量">
           <el-input-number v-model="planForm.containerCount" :min="1" :max="1000" />
@@ -156,6 +185,89 @@
       <template #footer>
         <el-button @click="showCreateDialog = false">取消</el-button>
         <el-button type="primary" @click="savePlan">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showArrivalDialog" title="登记到场" width="550px" class="no-print">
+      <el-form :model="arrivalForm" label-width="100px">
+        <el-form-item label="箱号" required>
+          <el-input v-model="arrivalForm.containerNo" placeholder="请输入箱号" />
+        </el-form-item>
+        <el-form-item label="尺寸">
+          <el-select v-model="arrivalForm.size" style="width: 100%;">
+            <el-option label="20GP" value="20GP" />
+            <el-option label="40GP" value="40GP" />
+            <el-option label="40HQ" value="40HQ" />
+            <el-option label="20RF" value="20RF" />
+            <el-option label="40RF" value="40RF" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="船名">
+          <el-input v-model="arrivalForm.vesselName" placeholder="请输入船名" />
+        </el-form-item>
+        <el-form-item label="提单号">
+          <el-input v-model="arrivalForm.blNo" placeholder="请输入提单号" />
+        </el-form-item>
+        <el-form-item label="箱区">
+          <el-select v-model="arrivalForm.zoneCode" style="width: 100%;" @change="onArrivalZoneChange">
+            <el-option v-for="zone in yardStore.yardZones" :key="zone.id" :label="zone.zoneName" :value="zone.zoneCode" />
+          </el-select>
+        </el-form-item>
+        <el-row :gutter="12">
+          <el-col :span="8">
+            <el-form-item label="贝位">
+              <el-input-number v-model="arrivalForm.bay" :min="1" :max="arrivalMaxBay" style="width: 100%;" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="排位">
+              <el-input-number v-model="arrivalForm.row" :min="1" :max="arrivalMaxRow" style="width: 100%;" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="层位">
+              <el-input-number v-model="arrivalForm.tier" :min="1" :max="arrivalMaxTier" style="width: 100%;" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-form-item label="备注">
+          <el-input v-model="arrivalForm.remarks" type="textarea" :rows="2" placeholder="请输入备注" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showArrivalDialog = false">取消</el-button>
+        <el-button type="primary" @click="confirmArrival">确认登记</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showDepartureDialog" title="登记离场" width="500px" class="no-print">
+      <el-form :model="departureForm" label-width="100px">
+        <el-form-item label="箱号" required>
+          <el-input v-model="departureForm.containerNo" placeholder="请输入箱号" @blur="loadContainerInfo" />
+        </el-form-item>
+        <el-form-item v-if="departureContainer" label="箱号信息">
+          <el-descriptions :column="1" size="small" border>
+            <el-descriptions-item label="尺寸">{{ departureContainer.size }}</el-descriptions-item>
+            <el-descriptions-item label="当前位置">{{ departureContainer.location }}</el-descriptions-item>
+            <el-descriptions-item label="船名">{{ departureContainer.vesselName || '-' }}</el-descriptions-item>
+          </el-descriptions>
+        </el-form-item>
+        <el-form-item v-else-if="departureForm.containerNo && !departureContainer">
+          <el-alert title="未找到该箱号，请检查是否正确" type="warning" :closable="false" show-icon />
+        </el-form-item>
+        <el-form-item label="船名">
+          <el-input v-model="departureForm.vesselName" placeholder="请输入船名" />
+        </el-form-item>
+        <el-form-item label="提单号">
+          <el-input v-model="departureForm.blNo" placeholder="请输入提单号" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="departureForm.remarks" type="textarea" :rows="2" placeholder="请输入备注" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showDepartureDialog = false">取消</el-button>
+        <el-button type="primary" :disabled="!departureContainer" @click="confirmDeparture">确认登记</el-button>
       </template>
     </el-dialog>
 
@@ -187,7 +299,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive } from 'vue'
 import { useYardStore } from '@/stores/yard'
-import type { YardPlan } from '@/types'
+import type { YardPlan, Container } from '@/types'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 
@@ -198,7 +310,10 @@ const filterStatus = ref('')
 const filterDate = ref('')
 const showCreateDialog = ref(false)
 const showDetailDialog = ref(false)
+const showArrivalDialog = ref(false)
+const showDepartureDialog = ref(false)
 const selectedPlan = ref<YardPlan | null>(null)
+const departureContainer = ref<Container | null>(null)
 
 const planForm = reactive({
   planType: 'import',
@@ -210,30 +325,68 @@ const planForm = reactive({
   remarks: ''
 })
 
-const importPlans = computed(() => yardStore.yardPlans.filter(p => p.planType === 'import'))
-const exportPlans = computed(() => yardStore.yardPlans.filter(p => p.planType === 'export'))
-
-const arrivalRecords = computed(() => {
-  return yardStore.containers.slice(0, 10).map(c => ({
-    containerNo: c.containerNo,
-    size: c.size,
-    vesselName: c.vesselName,
-    location: c.location,
-    arrivalTime: c.arrivalTime,
-    operator: '张三'
-  }))
+const arrivalForm = reactive({
+  containerNo: '',
+  size: '20GP',
+  vesselName: '',
+  blNo: '',
+  zoneCode: 'A',
+  bay: 1,
+  row: 1,
+  tier: 1,
+  remarks: ''
 })
 
-const departureRecords = computed(() => {
-  return yardStore.containers.slice(10, 20).map(c => ({
-    containerNo: c.containerNo,
-    size: c.size,
-    vesselName: c.vesselName,
-    fromLocation: c.location,
-    departureTime: c.departureTime || dayjs().format('YYYY-MM-DD HH:mm'),
-    operator: '李四'
-  }))
+const departureForm = reactive({
+  containerNo: '',
+  vesselName: '',
+  blNo: '',
+  remarks: ''
 })
+
+const arrivalMaxBay = computed(() => {
+  const zone = yardStore.yardZones.find(z => z.zoneCode === arrivalForm.zoneCode)
+  return zone?.maxBay || 10
+})
+const arrivalMaxRow = computed(() => {
+  const zone = yardStore.yardZones.find(z => z.zoneCode === arrivalForm.zoneCode)
+  return zone?.maxRow || 5
+})
+const arrivalMaxTier = computed(() => {
+  const zone = yardStore.yardZones.find(z => z.zoneCode === arrivalForm.zoneCode)
+  return zone?.maxTier || 4
+})
+
+const allPlans = computed(() => yardStore.yardPlans)
+
+const filteredPlans = computed(() => {
+  let plans = [...allPlans.value]
+  
+  if (filterType.value) {
+    plans = plans.filter(p => p.planType === filterType.value)
+  }
+  if (filterStatus.value) {
+    plans = plans.filter(p => p.status === filterStatus.value)
+  }
+  if (filterDate.value) {
+    const targetDate = dayjs(filterDate.value)
+    plans = plans.filter(p => {
+      const planDate = p.eta || p.etd
+      if (!planDate) return false
+      return dayjs(planDate).isSame(targetDate, 'day') || 
+             dayjs(planDate).isSame(targetDate.subtract(1, 'day'), 'day') ||
+             dayjs(planDate).isSame(targetDate.add(1, 'day'), 'day')
+    })
+  }
+  
+  return plans
+})
+
+const filteredImportPlans = computed(() => filteredPlans.value.filter(p => p.planType === 'import'))
+const filteredExportPlans = computed(() => filteredPlans.value.filter(p => p.planType === 'export'))
+
+function onTabChange() {
+}
 
 function getStatusName(status: string) {
   const map: Record<string, string> = {
@@ -296,8 +449,8 @@ function savePlan() {
     planType: planForm.planType as 'import' | 'export',
     vesselName: planForm.vesselName,
     voyageNo: planForm.voyageNo,
-    eta: planForm.eta ? dayjs(planForm.eta).format('YYYY-MM-DD HH:mm') : undefined,
-    etd: planForm.etd ? dayjs(planForm.etd).format('YYYY-MM-DD HH:mm') : undefined,
+    eta: planForm.eta || undefined,
+    etd: planForm.etd || undefined,
     containerCount: planForm.containerCount,
     containers: [],
     status: 'draft',
@@ -319,13 +472,115 @@ function savePlan() {
 }
 
 function handleSearch() {
-  ElMessage.success('查询完成')
+  ElMessage.success(`查询完成，共找到 ${filteredPlans.value.length} 条记录`)
 }
 
 function handleReset() {
   filterType.value = ''
   filterStatus.value = ''
   filterDate.value = ''
+  ElMessage.info('已重置筛选条件')
+}
+
+function onArrivalZoneChange() {
+  if (arrivalForm.bay > arrivalMaxBay.value) arrivalForm.bay = arrivalMaxBay.value
+  if (arrivalForm.row > arrivalMaxRow.value) arrivalForm.row = arrivalMaxRow.value
+  if (arrivalForm.tier > arrivalMaxTier.value) arrivalForm.tier = arrivalMaxTier.value
+}
+
+function confirmArrival() {
+  if (!arrivalForm.containerNo.trim()) {
+    ElMessage.warning('请输入箱号')
+    return
+  }
+  
+  const location = `${arrivalForm.zoneCode}${arrivalForm.bay}${arrivalForm.row}${arrivalForm.tier}`
+  
+  let container = yardStore.findContainerByNo(arrivalForm.containerNo.trim())
+  if (!container) {
+    container = yardStore.recordContainerArrival({
+      containerNo: arrivalForm.containerNo.trim(),
+      size: arrivalForm.size as any,
+      vesselName: arrivalForm.vesselName,
+      blNo: arrivalForm.blNo
+    })
+  }
+  
+  const assignResult = yardStore.assignSlot(
+    container.containerNo,
+    location,
+    arrivalForm.zoneCode,
+    arrivalForm.bay,
+    arrivalForm.row,
+    arrivalForm.tier
+  )
+  
+  if (!assignResult.success) {
+    ElMessage.error(assignResult.message)
+    return
+  }
+  
+  yardStore.createArrivalRecord({
+    containerNo: container.containerNo,
+    size: container.size,
+    vesselName: arrivalForm.vesselName || container.vesselName || '',
+    blNo: arrivalForm.blNo || container.blNo,
+    location,
+    operator: '当前用户',
+    remarks: arrivalForm.remarks
+  })
+  
+  ElMessage.success(`到场登记成功，箱位已分配: ${location}`)
+  showArrivalDialog.value = false
+  
+  arrivalForm.containerNo = ''
+  arrivalForm.size = '20GP'
+  arrivalForm.vesselName = ''
+  arrivalForm.blNo = ''
+  arrivalForm.zoneCode = 'A'
+  arrivalForm.bay = 1
+  arrivalForm.row = 1
+  arrivalForm.tier = 1
+  arrivalForm.remarks = ''
+}
+
+function loadContainerInfo() {
+  if (!departureForm.containerNo.trim()) {
+    departureContainer.value = null
+    return
+  }
+  departureContainer.value = yardStore.findContainerByNo(departureForm.containerNo.trim()) || null
+  if (departureContainer.value) {
+    departureForm.vesselName = departureContainer.value.vesselName || ''
+  }
+}
+
+function confirmDeparture() {
+  if (!departureContainer.value) {
+    ElMessage.warning('请输入有效的箱号')
+    return
+  }
+  
+  yardStore.recordContainerDeparture(departureContainer.value.containerNo)
+  
+  yardStore.createDepartureRecord({
+    containerNo: departureContainer.value.containerNo,
+    size: departureContainer.value.size,
+    vesselName: departureForm.vesselName || departureContainer.value.vesselName || '',
+    blNo: departureForm.blNo || departureContainer.value.blNo,
+    fromLocation: departureContainer.value.location,
+    operator: '当前用户',
+    remarks: departureForm.remarks
+  })
+  
+  ElMessage.success('离场登记成功')
+  showDepartureDialog.value = false
+  
+  departureForm.containerNo = ''
+  departureForm.vesselName = ''
+  departureForm.blNo = ''
+  departureForm.remarks = ''
+  departureContainer.value = null
 }
 
 function handlePrint() {

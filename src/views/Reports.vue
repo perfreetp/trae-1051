@@ -162,6 +162,11 @@
             <el-table-column prop="containerNo" label="箱号" width="140" />
             <el-table-column prop="size" label="尺寸" width="80" align="center" />
             <el-table-column prop="location" label="位置" width="100" align="center" />
+            <el-table-column label="优先级" width="80" align="center">
+              <template #default="{ row }">
+                <el-tag :type="getPriorityTagType(row.priority)" size="small">P{{ row.priority }}</el-tag>
+              </template>
+            </el-table-column>
             <el-table-column prop="arrivalTime" label="到场时间" width="160" />
             <el-table-column prop="overdueDays" label="超期天数" width="100" align="center">
               <template #default="{ row }">
@@ -169,6 +174,11 @@
               </template>
             </el-table-column>
             <el-table-column prop="consignee" label="收货人" width="120" show-overflow-tooltip />
+            <el-table-column label="操作" width="100" class="no-print">
+              <template #default="{ row }">
+                <el-button type="warning" link size="small" @click="adjustPriority(row)">优先级</el-button>
+              </template>
+            </el-table-column>
           </el-table>
         </el-card>
       </el-col>
@@ -178,6 +188,11 @@
             <el-table-column prop="containerNo" label="箱号" width="140" />
             <el-table-column prop="size" label="尺寸" width="80" align="center" />
             <el-table-column prop="location" label="位置" width="100" align="center" />
+            <el-table-column label="优先级" width="80" align="center">
+              <template #default="{ row }">
+                <el-tag :type="getPriorityTagType(row.priority)" size="small">P{{ row.priority }}</el-tag>
+              </template>
+            </el-table-column>
             <el-table-column prop="hazardLevel" label="危品等级" width="100" align="center">
               <template #default="{ row }">
                 <el-tag type="danger" size="small">第{{ row.hazardLevel }}类</el-tag>
@@ -186,7 +201,7 @@
             <el-table-column prop="arrivalTime" label="到场时间" width="160" />
             <el-table-column label="操作" width="100" class="no-print">
               <template #default="{ row }">
-                <el-button type="primary" link size="small">详情</el-button>
+                <el-button type="warning" link size="small" @click="adjustPriority(row)">优先级</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -223,12 +238,39 @@
         </el-card>
       </el-col>
     </el-row>
+
+    <el-dialog v-model="priorityDialogVisible" title="调整出箱优先级" width="450px" class="no-print">
+      <el-form label-width="100px">
+        <el-form-item label="当前箱号">
+          <span><strong>{{ priorityContainer?.containerNo }}</strong></span>
+        </el-form-item>
+        <el-form-item label="当前优先级">
+          <el-tag v-if="priorityContainer" :type="getPriorityTagType(priorityContainer.priority)">
+            P{{ priorityContainer.priority }}
+          </el-tag>
+        </el-form-item>
+        <el-form-item label="调整为">
+          <el-radio-group v-model="newPriority">
+            <el-radio :value="1">P1 - 最高优先</el-radio>
+            <el-radio :value="2">P2 - 高优先</el-radio>
+            <el-radio :value="3">P3 - 正常</el-radio>
+            <el-radio :value="4">P4 - 低优先</el-radio>
+            <el-radio :value="5">P5 - 最低优先</el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="priorityDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmAdjustPriority">确认调整</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted, nextTick } from 'vue'
 import { useYardStore } from '@/stores/yard'
+import type { Container } from '@/types'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import dayjs from 'dayjs'
@@ -240,6 +282,9 @@ const trendChart = ref<HTMLElement>()
 const typeChart = ref<HTMLElement>()
 const zoneChart = ref<HTMLElement>()
 const efficiencyChart = ref<HTMLElement>()
+const priorityDialogVisible = ref(false)
+const priorityContainer = ref<Container | null>(null)
+const newPriority = ref(3)
 
 const summary = reactive({
   totalIn: 186,
@@ -292,6 +337,27 @@ function handlePrint() {
 
 function printShiftList() {
   window.print()
+}
+
+function getPriorityTagType(priority: number) {
+  if (priority <= 1) return 'danger'
+  if (priority <= 2) return 'warning'
+  if (priority <= 3) return ''
+  return 'info'
+}
+
+function adjustPriority(container: Container) {
+  priorityContainer.value = container
+  newPriority.value = container.priority
+  priorityDialogVisible.value = true
+}
+
+function confirmAdjustPriority() {
+  if (priorityContainer.value) {
+    yardStore.adjustContainerPriority(priorityContainer.value.containerNo, newPriority.value)
+    ElMessage.success(`优先级已调整为 P${newPriority.value}`)
+    priorityDialogVisible.value = false
+  }
 }
 
 function initCharts() {

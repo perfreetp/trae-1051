@@ -166,6 +166,30 @@ export interface Staff {
   status: 'on_duty' | 'off_duty' | 'leave'
 }
 
+export interface ArrivalRecord {
+  id: string
+  containerNo: string
+  size: string
+  vesselName: string
+  blNo?: string
+  location: string
+  arrivalTime: string
+  operator: string
+  remarks?: string
+}
+
+export interface DepartureRecord {
+  id: string
+  containerNo: string
+  size: string
+  vesselName: string
+  blNo?: string
+  fromLocation: string
+  departureTime: string
+  operator: string
+  remarks?: string
+}
+
 export interface OperationLog {
   id: string
   operationType: string
