@@ -258,9 +258,9 @@ const priorityContainer = ref<Container | null>(null)
 const newPriority = ref(3)
 
 const displayContainers = computed(() => {
-  if (!localSearch.value) return yardStore.containers.slice(0, 50)
+  if (!localSearch.value) return yardStore.activeContainers.slice(0, 50)
   const keyword = localSearch.value.toLowerCase()
-  return yardStore.containers.filter(c => 
+  return yardStore.activeContainers.filter(c => 
     c.containerNo.toLowerCase().includes(keyword) ||
     c.location.toLowerCase().includes(keyword) ||
     c.blNo?.toLowerCase().includes(keyword) ||
@@ -329,25 +329,41 @@ function confirmAdjustPriority() {
 }
 
 function viewContainer(container: Container) {
+  if (yardStore.isContainerDeparted(container.containerNo)) {
+    ElMessage.warning('该箱号已离场，不在堆场中')
+    return
+  }
   selectedContainer.value = container
   detailVisible.value = true
 }
 
 function locateOnMap(container: Container) {
+  if (yardStore.isContainerDeparted(container.containerNo)) {
+    ElMessage.warning('该箱号已离场，不在堆场中')
+    return
+  }
   yardStore.searchKeyword = container.containerNo
   router.push('/yard-map')
 }
 
 function createMoveTask() {
   if (selectedContainer.value) {
-    yardStore.createMoveTask({
+    if (yardStore.isContainerDeparted(selectedContainer.value.containerNo)) {
+      ElMessage.error('该箱号已离场，需要先重新登记到场后才能创建作业任务')
+      return
+    }
+    const result = yardStore.createMoveTask({
       containerNo: selectedContainer.value.containerNo,
       fromLocation: selectedContainer.value.location,
       taskType: 'move'
     })
-    ElMessage.success('移箱任务已创建')
-    detailVisible.value = false
-    router.push('/move-tasks')
+    if (result.success) {
+      ElMessage.success('移箱任务已创建')
+      detailVisible.value = false
+      router.push('/move-tasks')
+    } else {
+      ElMessage.error(result.message)
+    }
   }
 }
 

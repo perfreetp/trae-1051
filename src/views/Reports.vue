@@ -295,8 +295,8 @@ const summary = reactive({
   exceptionCount: 8
 })
 
-const overdueList = computed(() => yardStore.containers.filter(c => c.isOverdue).slice(0, 10))
-const hazardousList = computed(() => yardStore.containers.filter(c => c.isHazardous).slice(0, 10))
+const overdueList = computed(() => yardStore.activeContainers.filter(c => c.isOverdue).slice(0, 10))
+const hazardousList = computed(() => yardStore.activeContainers.filter(c => c.isHazardous).slice(0, 10))
 
 const progressData = [
   { taskName: '马士基号 V0123E 卸船作业', planCount: 150, actualCount: 142, status: 'in_progress', operator: '甲班', remark: '预计2小时内完成' },

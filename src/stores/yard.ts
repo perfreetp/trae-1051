@@ -225,7 +225,11 @@ export const useYardStore = defineStore('yard', () => {
     return slot ? slot.isOccupied : false
   }
 
-  function createMoveTask(task: Partial<MoveTask> & { containerNo: string }): MoveTask {
+  function createMoveTask(task: Partial<MoveTask> & { containerNo: string }): { success: boolean; message: string; task?: MoveTask } {
+    if (isContainerDeparted(task.containerNo)) {
+      return { success: false, message: '该箱号已离场，需要先重新登记到场后才能创建作业任务' }
+    }
+    
     const container = findContainerByNo(task.containerNo)
     const containerPriority = container?.priority || 3
     
@@ -245,7 +249,7 @@ export const useYardStore = defineStore('yard', () => {
     }
     moveTasks.value.unshift(newTask)
     saveAll()
-    return newTask
+    return { success: true, message: '任务创建成功', task: newTask }
   }
 
   function updateMoveTask(taskNo: string, updates: Partial<MoveTask>) {
@@ -379,7 +383,7 @@ export const useYardStore = defineStore('yard', () => {
       return { success: false, message: '箱号不存在' }
     }
     
-    const task = createMoveTask({
+    const result = createMoveTask({
       containerNo,
       fromLocation: container.location,
       toLocation,
@@ -387,7 +391,7 @@ export const useYardStore = defineStore('yard', () => {
       taskType: 'move',
       containerId: container.id
     })
-    return { success: true, message: '移箱任务已创建', task }
+    return result
   }
 
   function optimizeMoveTasks(tasks: MoveTask[]): MoveTask[] {

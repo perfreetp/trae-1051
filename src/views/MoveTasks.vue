@@ -251,7 +251,10 @@
           </el-select>
         </el-form-item>
         <el-form-item label="箱号">
-          <el-input v-model="taskForm.containerNo" placeholder="请输入箱号" />
+          <el-input v-model="taskForm.containerNo" placeholder="请输入箱号" @blur="loadContainerInfo" @keyup.enter="loadContainerInfo" />
+        </el-form-item>
+        <el-form-item v-if="loadContainerError">
+          <el-alert :title="loadContainerError" type="error" :closable="false" show-icon size="small" />
         </el-form-item>
         <el-form-item label="起始位置">
           <el-input v-model="taskForm.fromLocation" placeholder="例如: A123" />
@@ -334,6 +337,8 @@ const showDetailDialog = ref(false)
 const selectedTask = ref<MoveTask | null>(null)
 const equipmentList = ref<Equipment[]>(mockEquipments)
 const staffList = ref<Staff[]>(mockStaffs)
+const loadContainerError = ref('')
+const autoLoadedPriority = ref(false)
 
 const taskForm = reactive({
   taskType: 'move',
@@ -480,33 +485,81 @@ function cancelTask(task: MoveTask) {
   }).catch(() => {})
 }
 
+function loadContainerInfo() {
+  loadContainerError.value = ''
+  if (!taskForm.containerNo.trim()) {
+    return
+  }
+  
+  const no = taskForm.containerNo.trim()
+  
+  if (yardStore.isContainerDeparted(no)) {
+    loadContainerError.value = '该箱号已离场，需要先重新登记到场后才能创建作业任务'
+    autoLoadedPriority.value = false
+    return
+  }
+  
+  const container = yardStore.findContainerByNo(no)
+  if (container) {
+    if (!autoLoadedPriority.value) {
+      taskForm.priority = container.priority
+    }
+    if (!taskForm.fromLocation && container.location) {
+      taskForm.fromLocation = container.location
+    }
+  } else {
+    loadContainerError.value = '未找到该箱号，请检查是否正确'
+  }
+}
+
 function createTask() {
   if (!taskForm.containerNo || !taskForm.fromLocation) {
     ElMessage.warning('请填写必要信息')
     return
   }
   
-  yardStore.createMoveTask({
+  const no = taskForm.containerNo.trim()
+  
+  if (yardStore.isContainerDeparted(no)) {
+    ElMessage.error('该箱号已离场，需要先重新登记到场后才能创建作业任务')
+    return
+  }
+  
+  const container = yardStore.findContainerByNo(no)
+  if (!container) {
+    ElMessage.error('未找到该箱号，请检查是否正确')
+    return
+  }
+  
+  const taskPriority = autoLoadedPriority.value ? taskForm.priority : container.priority
+  
+  const result = yardStore.createMoveTask({
     taskType: taskForm.taskType as MoveTask['taskType'],
-    containerNo: taskForm.containerNo,
+    containerNo: no,
     fromLocation: taskForm.fromLocation,
     toLocation: taskForm.toLocation,
-    priority: taskForm.priority,
+    priority: taskPriority,
     equipment: taskForm.equipment,
     assignedTo: taskForm.assignedTo,
     remarks: taskForm.remarks
   })
   
-  ElMessage.success('任务创建成功')
-  showCreateDialog.value = false
-  
-  taskForm.containerNo = ''
-  taskForm.fromLocation = ''
-  taskForm.toLocation = ''
-  taskForm.priority = 3
-  taskForm.equipment = ''
-  taskForm.assignedTo = ''
-  taskForm.remarks = ''
+  if (result.success) {
+    ElMessage.success('任务创建成功')
+    showCreateDialog.value = false
+    loadContainerError.value = ''
+    
+    taskForm.containerNo = ''
+    taskForm.fromLocation = ''
+    taskForm.toLocation = ''
+    taskForm.priority = 3
+    taskForm.equipment = ''
+    taskForm.assignedTo = ''
+    taskForm.remarks = ''
+    autoLoadedPriority.value = false
+  } else {
+    ElMessage.error(result.message)
+  }
 }
 
 function handleSearch() {

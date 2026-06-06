@@ -409,14 +409,26 @@ function highlightContainer() {
 function handleMoveOut() {
   if (selectedSlot.value?.containerNo) {
     const container = yardStore.findContainerByNo(selectedSlot.value.containerNo)
-    yardStore.createMoveTask({
+    if (!container) {
+      ElMessage.error('未找到该集装箱')
+      return
+    }
+    if (yardStore.isContainerDeparted(container.containerNo)) {
+      ElMessage.error('该箱号已离场，需要先重新登记到场后才能创建作业任务')
+      return
+    }
+    const result = yardStore.createMoveTask({
       containerNo: selectedSlot.value.containerNo,
       fromLocation: selectedSlot.value.id.replace(/-/g, ''),
       taskType: 'retrieve',
-      priority: container?.priority || 3
+      priority: container.priority
     })
-    ElMessage.success('已创建提箱任务')
-    router.push('/move-tasks')
+    if (result.success) {
+      ElMessage.success('已创建提箱任务')
+      router.push('/move-tasks')
+    } else {
+      ElMessage.error(result.message)
+    }
   }
 }
 
