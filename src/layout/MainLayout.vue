@@ -89,8 +89,16 @@ const currentPageTitle = computed(() => {
 function handleSearch() {
   if (!searchInput.value.trim()) return
   
-  yardStore.searchKeyword = searchInput.value.trim()
-  const container = yardStore.findContainerByNo(searchInput.value.trim())
+  const no = searchInput.value.trim()
+  yardStore.searchKeyword = no
+  
+  if (yardStore.isContainerDeparted(no)) {
+    ElMessage.warning('该箱号已离场，不在堆场中')
+    router.push('/overview')
+    return
+  }
+  
+  const container = yardStore.findContainerByNo(no)
   
   if (container) {
     ElMessage.success(`找到集装箱: ${container.containerNo}`)

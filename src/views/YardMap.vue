@@ -372,7 +372,13 @@ function searchContainer() {
     foundContainer.value = null
     return
   }
-  foundContainer.value = yardStore.findContainerByNo(searchNo.value.trim()) || null
+  const no = searchNo.value.trim()
+  if (yardStore.isContainerDeparted(no)) {
+    ElMessage.warning('该箱号已离场，不在堆场中')
+    foundContainer.value = null
+    return
+  }
+  foundContainer.value = yardStore.findContainerByNo(no) || null
   if (!foundContainer.value) {
     ElMessage.warning('未找到该集装箱')
   }
@@ -439,7 +445,29 @@ function confirmAssign() {
     return
   }
   
-  const container = yardStore.findContainerByNo(assignForm.containerNo.trim())
+  const no = assignForm.containerNo.trim()
+  
+  if (yardStore.isContainerDeparted(no)) {
+    ElMessageBox.confirm(
+      '该箱号已离场，是否先重新登记到场再分配箱位？',
+      '箱号已离场',
+      {
+        confirmButtonText: '重新登记并分配',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    ).then(() => {
+      const result = yardStore.recordContainerArrival({ containerNo: no })
+      if (result.success && result.container) {
+        doAssign(result.container.containerNo)
+      } else {
+        ElMessage.error(result.message)
+      }
+    }).catch(() => {})
+    return
+  }
+  
+  const container = yardStore.findContainerByNo(no)
   
   if (!container) {
     ElMessageBox.confirm(
@@ -451,15 +479,17 @@ function confirmAssign() {
         type: 'warning'
       }
     ).then(() => {
-      const newContainer = yardStore.recordContainerArrival({
-        containerNo: assignForm.containerNo.trim()
-      })
-      doAssign(newContainer.containerNo)
+      const result = yardStore.recordContainerArrival({ containerNo: no })
+      if (result.success && result.container) {
+        doAssign(result.container.containerNo)
+      } else {
+        ElMessage.error(result.message)
+      }
     }).catch(() => {})
     return
   }
   
-  doAssign(assignForm.containerNo.trim())
+  doAssign(no)
 }
 
 function doAssign(containerNo: string) {

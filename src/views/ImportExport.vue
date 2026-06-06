@@ -216,20 +216,23 @@
         <el-row :gutter="12">
           <el-col :span="8">
             <el-form-item label="贝位">
-              <el-input-number v-model="arrivalForm.bay" :min="1" :max="arrivalMaxBay" style="width: 100%;" />
+              <el-input-number v-model="arrivalForm.bay" :min="1" :max="arrivalMaxBay" style="width: 100%;" @change="checkSlotOccupied" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
             <el-form-item label="排位">
-              <el-input-number v-model="arrivalForm.row" :min="1" :max="arrivalMaxRow" style="width: 100%;" />
+              <el-input-number v-model="arrivalForm.row" :min="1" :max="arrivalMaxRow" style="width: 100%;" @change="checkSlotOccupied" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
             <el-form-item label="层位">
-              <el-input-number v-model="arrivalForm.tier" :min="1" :max="arrivalMaxTier" style="width: 100%;" />
+              <el-input-number v-model="arrivalForm.tier" :min="1" :max="arrivalMaxTier" style="width: 100%;" @change="checkSlotOccupied" />
             </el-form-item>
           </el-col>
         </el-row>
+        <el-form-item v-if="slotOccupiedWarning">
+          <el-alert :title="slotOccupiedWarning" type="error" :closable="false" show-icon size="small" />
+        </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="arrivalForm.remarks" type="textarea" :rows="2" placeholder="请输入备注" />
         </el-form-item>
@@ -314,6 +317,7 @@ const showArrivalDialog = ref(false)
 const showDepartureDialog = ref(false)
 const selectedPlan = ref<YardPlan | null>(null)
 const departureContainer = ref<Container | null>(null)
+const slotOccupiedWarning = ref('')
 
 const planForm = reactive({
   planType: 'import',
@@ -486,6 +490,16 @@ function onArrivalZoneChange() {
   if (arrivalForm.bay > arrivalMaxBay.value) arrivalForm.bay = arrivalMaxBay.value
   if (arrivalForm.row > arrivalMaxRow.value) arrivalForm.row = arrivalMaxRow.value
   if (arrivalForm.tier > arrivalMaxTier.value) arrivalForm.tier = arrivalMaxTier.value
+  checkSlotOccupied()
+}
+
+function checkSlotOccupied() {
+  const occupied = yardStore.isSlotOccupied(arrivalForm.zoneCode, arrivalForm.bay, arrivalForm.row, arrivalForm.tier)
+  if (occupied) {
+    slotOccupiedWarning.value = `该箱位 (${arrivalForm.zoneCode}${arrivalForm.bay}${arrivalForm.row}${arrivalForm.tier}) 已被占用，请选择其他位置`
+  } else {
+    slotOccupiedWarning.value = ''
+  }
 }
 
 function confirmArrival() {
@@ -496,14 +510,37 @@ function confirmArrival() {
   
   const location = `${arrivalForm.zoneCode}${arrivalForm.bay}${arrivalForm.row}${arrivalForm.tier}`
   
-  let container = yardStore.findContainerByNo(arrivalForm.containerNo.trim())
+  if (yardStore.isSlotOccupied(arrivalForm.zoneCode, arrivalForm.bay, arrivalForm.row, arrivalForm.tier)) {
+    ElMessage.error(`箱位 ${location} 已被占用，请选择其他位置`)
+    return
+  }
+  
+  let container = yardStore.findContainerByNo(arrivalForm.containerNo.trim(), true)
+  
   if (!container) {
-    container = yardStore.recordContainerArrival({
+    const arrivalResult = yardStore.recordContainerArrival({
       containerNo: arrivalForm.containerNo.trim(),
       size: arrivalForm.size as any,
       vesselName: arrivalForm.vesselName,
       blNo: arrivalForm.blNo
     })
+    if (!arrivalResult.success || !arrivalResult.container) {
+      ElMessage.error(arrivalResult.message)
+      return
+    }
+    container = arrivalResult.container
+  } else if (container.status === 'out') {
+    const reArrivalResult = yardStore.recordContainerArrival({
+      containerNo: arrivalForm.containerNo.trim(),
+      size: arrivalForm.size as any,
+      vesselName: arrivalForm.vesselName,
+      blNo: arrivalForm.blNo
+    })
+    if (!reArrivalResult.success || !reArrivalResult.container) {
+      ElMessage.error(reArrivalResult.message)
+      return
+    }
+    container = reArrivalResult.container
   }
   
   const assignResult = yardStore.assignSlot(
@@ -532,6 +569,7 @@ function confirmArrival() {
   
   ElMessage.success(`到场登记成功，箱位已分配: ${location}`)
   showArrivalDialog.value = false
+  slotOccupiedWarning.value = ''
   
   arrivalForm.containerNo = ''
   arrivalForm.size = '20GP'
@@ -549,6 +587,11 @@ function loadContainerInfo() {
     departureContainer.value = null
     return
   }
+  if (yardStore.isContainerDeparted(departureForm.containerNo.trim())) {
+    ElMessage.warning('该箱号已离场，无需重复登记')
+    departureContainer.value = null
+    return
+  }
   departureContainer.value = yardStore.findContainerByNo(departureForm.containerNo.trim()) || null
   if (departureContainer.value) {
     departureForm.vesselName = departureContainer.value.vesselName || ''
@@ -561,19 +604,30 @@ function confirmDeparture() {
     return
   }
   
-  yardStore.recordContainerDeparture(departureContainer.value.containerNo)
+  if (yardStore.isContainerDeparted(departureContainer.value.containerNo)) {
+    ElMessage.warning('该箱号已离场，无需重复登记')
+    return
+  }
+  
+  const oldLocation = departureContainer.value.location
+  const depResult = yardStore.recordContainerDeparture(departureContainer.value.containerNo)
+  
+  if (!depResult.success) {
+    ElMessage.error(depResult.message)
+    return
+  }
   
   yardStore.createDepartureRecord({
     containerNo: departureContainer.value.containerNo,
     size: departureContainer.value.size,
     vesselName: departureForm.vesselName || departureContainer.value.vesselName || '',
     blNo: departureForm.blNo || departureContainer.value.blNo,
-    fromLocation: departureContainer.value.location,
+    fromLocation: oldLocation,
     operator: '当前用户',
     remarks: departureForm.remarks
   })
   
-  ElMessage.success('离场登记成功')
+  ElMessage.success('离场登记成功，箱位已释放')
   showDepartureDialog.value = false
   
   departureForm.containerNo = ''
